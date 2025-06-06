@@ -2,7 +2,6 @@ import os
 import uuid
 from kokoro import KPipeline
 import soundfile as sf
-from huggingface_hub import list_repo_files
 
 pipeline = KPipeline(lang_code="a") # 'a' for American English
 
