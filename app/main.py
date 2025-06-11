@@ -1,16 +1,18 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from fastapi.responses import FileResponse
+from fastapi.responses import StreamingResponse
 from .tts_engine import synthesize
 from huggingface_hub import list_repo_files
 from enum import Enum
+import io
 
 app = FastAPI(title="Kokoro TTS API", version="1.0.0")
 
 class AudioFormat(str, Enum):
     wav = "wav"
-    mp3 = "mp3"
     flac = "flac"
+    ogg = "ogg"
+    mp3 = "mp3"
     opus = "opus"
     pcm = "pcm"
 
@@ -27,18 +29,20 @@ async def root():
 @app.post("/speak")
 async def speak(req: TTSRequest):
     try:
-        output_path = synthesize(req.text, req.speaker, req.speed, req.format.value)
+        audio_bytes = synthesize(req.text, req.speaker, req.speed, req.format.value)
+        audio_stream = io.BytesIO(audio_bytes)
         media_types = {
             "wav": "audio/wav",
-            "mp3": "audio/mpeg", 
             "flac": "audio/flac",
+            "ogg": "audio/ogg",
+            "mp3": "audio/mpeg", 
             "opus": "audio/opus",
             "pcm": "audio/pcm"
         }
         media_type = media_types.get(req.format.value, "audio/wav")
         file_name = f"speech_{req.speaker}.{req.format.value}"
         headers = {"content-disposition": f'attachment; filename="{file_name}"'}
-        return FileResponse(output_path, media_type=media_type, headers=headers)
+        return StreamingResponse(audio_stream, media_type=media_type, headers=headers)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
