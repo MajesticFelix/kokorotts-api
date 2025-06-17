@@ -3,7 +3,7 @@ import torch
 from kokoro import KPipeline
 import soundfile as sf
 from pydub import AudioSegment
-from typing import Dict
+from typing import Dict, Iterator
 
 pipeline = KPipeline(lang_code="a", device="cuda" if torch.cuda.is_available() else "cpu") # 'a' for American English
 
@@ -88,4 +88,50 @@ def synthesize_with_voice_blend(text: str, voice_weights: Dict[str, float], spee
             return audio_to_bytes(audio, format)
     except Exception as e:
         raise RuntimeError(f"Voice blend synthesis failed: {str(e)}")
+
+def synthesize_streaming(text: str, speaker: str, speed: float, format: str = "wav", split_pattern: str = r'[.!?]+\s*') -> Iterator[bytes]:
+    """Generate text-to-speech audio in streaming chunks"""
+    if not text.strip():
+        raise ValueError("Text cannot be empty")
+    
+    try:
+        generator = pipeline(text, speaker, speed, split_pattern=split_pattern)
+        for i, (gs, ps, audio) in enumerate(generator):
+            print(f"Streaming chunk {i}: {gs} -> {len(audio)} samples")
+            yield audio_to_bytes(audio, format)
+    except Exception as e:
+        raise RuntimeError(f"Streaming synthesis failed: {str(e)}")
+
+def synthesize_streaming_with_voice_blend(text: str, voice_weights: Dict[str, float], speed: float, format: str = "wav", split_pattern: str = r'[.!?]+\s*') -> Iterator[bytes]:
+    """Generate text-to-speech audio with blended voices in streaming chunks"""
+    if not text.strip():
+        raise ValueError("Text cannot be empty")
+    
+    if not voice_weights:
+        raise ValueError("Voice weights cannot be empty")
+    
+    # Normalize weights to sum to 1.0
+    total_weight = sum(voice_weights.values())
+    if total_weight <= 0:
+        raise ValueError("Total voice weights must be positive")
+    
+    normalized_weights = {voice: weight / total_weight for voice, weight in voice_weights.items()}
+    
+    try:
+        # Load and blend voice tensors
+        blended_voice = None
+        for voice_name, weight in normalized_weights.items():
+            voice_tensor = pipeline.load_voice(voice_name)
+            if blended_voice is None:
+                blended_voice = weight * voice_tensor
+            else:
+                blended_voice += weight * voice_tensor
+        
+        # Generate audio with blended voice in chunks
+        generator = pipeline(text, voice=blended_voice, speed=speed, split_pattern=split_pattern)
+        for i, (gs, ps, audio) in enumerate(generator):
+            print(f"Streaming chunk {i} with blended voice: {gs} -> {len(audio)} samples")
+            yield audio_to_bytes(audio, format)
+    except Exception as e:
+        raise RuntimeError(f"Voice blend streaming synthesis failed: {str(e)}")
 

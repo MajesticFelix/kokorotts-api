@@ -1,14 +1,18 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from .tts_engine import synthesize, synthesize_with_voice_blend
+from .tts_engine import synthesize, synthesize_with_voice_blend, synthesize_streaming, synthesize_streaming_with_voice_blend
 from typing import Dict
 from huggingface_hub import list_repo_files
 from enum import Enum
 import io
 
 app = FastAPI(title="Kokoro TTS API", version="1.0.0")
+
+# Mount static files
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 app.add_middleware(
     CORSMiddleware,
@@ -38,9 +42,28 @@ class TTSBlendRequest(BaseModel):
     speed: float = 1.0
     format: AudioFormat = AudioFormat.wav
 
+class TTSStreamRequest(BaseModel):
+    text: str
+    speaker: str = "af_heart"
+    speed: float = 1.0
+    format: AudioFormat = AudioFormat.wav
+    split_pattern: str = r'[.!?]+\s*'
+
+class TTSStreamBlendRequest(BaseModel):
+    text: str
+    voice_weights: Dict[str, float]
+    speed: float = 1.0
+    format: AudioFormat = AudioFormat.wav
+    split_pattern: str = r'[.!?]+\s*'
+
 @app.get("/")
 async def root():
-    return {"message": "Kokoro TTS API is running!", "docs": "/docs"}
+    return {"message": "Kokoro TTS API is running!", "docs": "/docs", "test_streaming": "/test"}
+
+@app.get("/test", response_class=HTMLResponse)
+async def test_page():
+    with open("static/test_streaming.html", "r") as f:
+        return HTMLResponse(content=f.read())
 
 @app.post("/speak")
 async def speak(req: TTSRequest):
@@ -82,6 +105,48 @@ async def speak_blend(req: TTSBlendRequest):
         file_name = f"speech_blend_{voice_names}.{req.format.value}"
         headers = {"Content-Disposition": f'attachment; filename="{file_name}"'}
         return StreamingResponse(audio_stream, media_type=media_type, headers=headers)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/speak-stream")
+async def speak_stream(req: TTSStreamRequest):
+    try:
+        def generate_audio():
+            for audio_chunk in synthesize_streaming(req.text, req.speaker, req.speed, req.format.value, req.split_pattern):
+                yield audio_chunk
+        
+        media_types = {
+            "wav": "audio/wav",
+            "flac": "audio/flac",
+            "ogg": "audio/ogg",
+            "mp3": "audio/mpeg", 
+            "opus": "audio/opus",
+            "pcm": "audio/pcm"
+        }
+        media_type = media_types.get(req.format.value, "audio/wav")
+        # No Content-Disposition header for true streaming
+        return StreamingResponse(generate_audio(), media_type=media_type)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/speak-stream-blend")
+async def speak_stream_blend(req: TTSStreamBlendRequest):
+    try:
+        def generate_audio():
+            for audio_chunk in synthesize_streaming_with_voice_blend(req.text, req.voice_weights, req.speed, req.format.value, req.split_pattern):
+                yield audio_chunk
+        
+        media_types = {
+            "wav": "audio/wav",
+            "flac": "audio/flac",
+            "ogg": "audio/ogg",
+            "mp3": "audio/mpeg", 
+            "opus": "audio/opus",
+            "pcm": "audio/pcm"
+        }
+        media_type = media_types.get(req.format.value, "audio/wav")
+        # No Content-Disposition header for true streaming
+        return StreamingResponse(generate_audio(), media_type=media_type)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
