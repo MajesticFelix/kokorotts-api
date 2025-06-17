@@ -3,6 +3,7 @@ import torch
 from kokoro import KPipeline
 import soundfile as sf
 from pydub import AudioSegment
+from typing import Dict
 
 pipeline = KPipeline(lang_code="a", device="cuda" if torch.cuda.is_available() else "cpu") # 'a' for American English
 
@@ -55,4 +56,36 @@ def audio_to_bytes(audio_data, target_format: str) -> bytes:
     
     raise ValueError(f"Unsupported format: {target_format}")
 
-# def synthesize_multi_voice_blend(text: str, voice_weights: dict, speed: float) -> str:
+def synthesize_with_voice_blend(text: str, voice_weights: Dict[str, float], speed: float, format: str = "wav") -> bytes:
+    """Generate text-to-speech audio with blended voices and return as bytes"""
+    if not text.strip():
+        raise ValueError("Text cannot be empty")
+    
+    if not voice_weights:
+        raise ValueError("Voice weights cannot be empty")
+    
+    # Normalize weights to sum to 1.0
+    total_weight = sum(voice_weights.values())
+    if total_weight <= 0:
+        raise ValueError("Total voice weights must be positive")
+    
+    normalized_weights = {voice: weight / total_weight for voice, weight in voice_weights.items()}
+    
+    try:
+        # Load and blend voice tensors
+        blended_voice = None
+        for voice_name, weight in normalized_weights.items():
+            voice_tensor = pipeline.load_voice(voice_name)
+            if blended_voice is None:
+                blended_voice = weight * voice_tensor
+            else:
+                blended_voice += weight * voice_tensor
+        
+        # Generate audio with blended voice
+        generator = pipeline(text, voice=blended_voice, speed=speed)
+        for i, (gs, ps, audio) in enumerate(generator):
+            print(f"Generated chunk {i} with blended voice: {gs} -> {len(audio)} samples")
+            return audio_to_bytes(audio, format)
+    except Exception as e:
+        raise RuntimeError(f"Voice blend synthesis failed: {str(e)}")
+

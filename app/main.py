@@ -2,7 +2,8 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from .tts_engine import synthesize
+from .tts_engine import synthesize, synthesize_with_voice_blend
+from typing import Dict
 from huggingface_hub import list_repo_files
 from enum import Enum
 import io
@@ -31,6 +32,12 @@ class TTSRequest(BaseModel):
     speed: float = 1.0
     format: AudioFormat = AudioFormat.wav
 
+class TTSBlendRequest(BaseModel):
+    text: str
+    voice_weights: Dict[str, float]
+    speed: float = 1.0
+    format: AudioFormat = AudioFormat.wav
+
 @app.get("/")
 async def root():
     return {"message": "Kokoro TTS API is running!", "docs": "/docs"}
@@ -51,6 +58,28 @@ async def speak(req: TTSRequest):
         }
         media_type = media_types.get(req.format.value, "audio/wav")
         file_name = f"speech_{req.speaker}.{req.format.value}"
+        headers = {"Content-Disposition": f'attachment; filename="{file_name}"'}
+        return StreamingResponse(audio_stream, media_type=media_type, headers=headers)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/speak-blend")
+async def speak_blend(req: TTSBlendRequest):
+    try:
+        audio_bytes = synthesize_with_voice_blend(req.text, req.voice_weights, req.speed, req.format.value)
+        audio_stream = io.BytesIO(audio_bytes)
+
+        media_types = {
+            "wav": "audio/wav",
+            "flac": "audio/flac",
+            "ogg": "audio/ogg",
+            "mp3": "audio/mpeg", 
+            "opus": "audio/opus",
+            "pcm": "audio/pcm"
+        }
+        media_type = media_types.get(req.format.value, "audio/wav")
+        voice_names = "_".join(req.voice_weights.keys())
+        file_name = f"speech_blend_{voice_names}.{req.format.value}"
         headers = {"Content-Disposition": f'attachment; filename="{file_name}"'}
         return StreamingResponse(audio_stream, media_type=media_type, headers=headers)
     except Exception as e:
