@@ -33,7 +33,7 @@ async def root():
 
 @app.get("/test", response_class=HTMLResponse)
 async def test_page():
-    with open("static/test_streaming.html", "r") as f:
+    with open("static/test_streaming.html", "r") as f: # currently not implemented
         return HTMLResponse(content=f.read())
 
 
@@ -97,13 +97,28 @@ def get_media_type(format_name: str) -> str:
 @openai_router.post("/audio/speech")
 async def create_speech(request: OpenAISpeechRequest):
     """OpenAI compatible speech synthesis endpoint"""
+    # Validate format first (before try block to avoid wrapping HTTPException)
+    if request.response_format not in ["wav", "mp3", "flac", "ogg", "opus"]:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": {"message": f"Unsupported response_format: {request.response_format}", "type": "invalid_request_error"}}
+        )
+    
+    # Validate input text
+    if not request.input or not request.input.strip():
+        raise HTTPException(
+            status_code=400,
+            detail={"error": {"message": "Input text cannot be empty", "type": "invalid_request_error"}}
+        )
+    
+    # Validate speed parameter
+    if not (0.25 <= request.speed <= 4.0):
+        raise HTTPException(
+            status_code=400,
+            detail={"error": {"message": "Speed must be between 0.25 and 4.0", "type": "invalid_request_error"}}
+        )
+    
     try:
-        # Validate format
-        if request.response_format not in ["wav", "mp3", "flac", "ogg", "opus"]:
-            raise HTTPException(
-                status_code=400,
-                detail={"error": {"message": f"Unsupported response_format: {request.response_format}", "type": "invalid_request_error"}}
-            )
         
         # Parse voice specification
         voice_spec = parse_voice_specification(request.voice)
@@ -152,11 +167,26 @@ async def create_speech(request: OpenAISpeechRequest):
             return StreamingResponse(audio_stream, media_type=media_type, headers=headers)
             
     except ValueError as e:
+        # Handle voice parsing and synthesis validation errors
         raise HTTPException(
             status_code=400,
             detail={"error": {"message": str(e), "type": "invalid_request_error"}}
         )
+    except RuntimeError as e:
+        # Handle TTS synthesis errors
+        error_msg = str(e)
+        if "synthesis failed" in error_msg.lower() or "voice" in error_msg.lower():
+            raise HTTPException(
+                status_code=400,
+                detail={"error": {"message": error_msg, "type": "invalid_request_error"}}
+            )
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail={"error": {"message": f"Synthesis error: {error_msg}", "type": "internal_server_error"}}
+            )
     except Exception as e:
+        # Handle unexpected errors
         raise HTTPException(
             status_code=500,
             detail={"error": {"message": f"Internal server error: {str(e)}", "type": "internal_server_error"}}
