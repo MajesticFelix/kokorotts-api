@@ -111,6 +111,32 @@ def audio_to_raw_bytes(audio_data) -> bytes:
     except Exception as e:
         raise ValueError(f"Raw audio conversion failed: {str(e)}")
 
+def create_wav_streaming_header(sample_rate: int = 24000, channels: int = 1, bits_per_sample: int = 16) -> bytes:
+    """Create a WAV header with large placeholder data size for streaming"""
+    # WAV header structure with dummy large data size for streaming
+    header = bytearray()
+    
+    # RIFF header
+    header.extend(b'RIFF')
+    header.extend((0x7FFFFFFF - 8).to_bytes(4, 'little'))  # Large placeholder for file size
+    header.extend(b'WAVE')
+    
+    # fmt chunk
+    header.extend(b'fmt ')
+    header.extend((16).to_bytes(4, 'little'))  # fmt chunk size
+    header.extend((1).to_bytes(2, 'little'))   # PCM format
+    header.extend(channels.to_bytes(2, 'little'))  # Number of channels
+    header.extend(sample_rate.to_bytes(4, 'little'))  # Sample rate
+    header.extend((sample_rate * channels * bits_per_sample // 8).to_bytes(4, 'little'))  # Byte rate
+    header.extend((channels * bits_per_sample // 8).to_bytes(2, 'little'))  # Block align
+    header.extend(bits_per_sample.to_bytes(2, 'little'))  # Bits per sample
+    
+    # data chunk
+    header.extend(b'data')
+    header.extend((0x7FFFFFFF - 44).to_bytes(4, 'little'))  # Large placeholder for data size
+    
+    return bytes(header)
+
 def synthesize(text: str, speaker: str, speed: float, format: str="wav") -> bytes:
     """Generate text-to-speech audio and return as bytes with automatic text chunking"""
     if not text.strip():
@@ -217,8 +243,9 @@ def synthesize_streaming(text: str, speaker: str, speed: float, format: str = "w
                 
                 if format.lower() == "wav":
                     if chunk_counter == 1:
-                        # Very first audio chunk gets WAV header
-                        yield audio_to_bytes(audio, format)
+                        # Send dummy WAV header first, then raw audio data
+                        yield create_wav_streaming_header()
+                        yield audio_to_raw_bytes(audio)
                     else:
                         # All subsequent chunks are raw audio data
                         yield audio_to_raw_bytes(audio)
@@ -270,8 +297,9 @@ def synthesize_streaming_with_voice_blend(text: str, voice_weights: Dict[str, fl
                 
                 if format.lower() == "wav":
                     if chunk_counter == 1:
-                        # Very first audio chunk gets WAV header
-                        yield audio_to_bytes(audio, format)
+                        # Send dummy WAV header first, then raw audio data
+                        yield create_wav_streaming_header()
+                        yield audio_to_raw_bytes(audio)
                     else:
                         # All subsequent chunks are raw audio data
                         yield audio_to_raw_bytes(audio)
