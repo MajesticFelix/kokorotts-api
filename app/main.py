@@ -29,7 +29,14 @@ app.add_middleware(
 
 @app.get("/")
 async def root():
-    return {"message": "Kokoro TTS API is running!", "docs": "/docs", "openai_endpoint": "/v1/audio/speech", "test_page": "/test"}
+    return {
+        "message": "Kokoro TTS API is running!", 
+        "docs": "/docs", 
+        "openai_endpoint": "/v1/audio/speech", 
+        "voices_endpoint": "/v1/audio/voices", 
+        "languages_endpoint": "/v1/audio/languages",
+        "test_page": "/test"
+    }
 
 @app.get("/test", response_class=HTMLResponse)
 async def test_page():
@@ -49,6 +56,8 @@ class OpenAISpeechRequest(BaseModel):
 class OpenAIVoiceResponse(BaseModel):
     voices: List[str]
 
+class OpenAILanguageResponse(BaseModel):
+    languages: List[Dict[str, str]]
 
 # Create OpenAI compatible router
 openai_router = APIRouter(prefix="/v1")
@@ -93,6 +102,56 @@ def get_media_type(format_name: str) -> str:
         "opus": "audio/opus"
     }
     return media_types.get(format_name.lower(), "audio/mpeg")
+
+def get_supported_voices() -> List[str]:
+    """Get list of supported voices from repository"""
+    files = list_repo_files(repo_id="hexgrad/Kokoro-82M")
+    voice_files = [f for f in files if f.endswith(".pt") and "voices" in f]
+    voices = [f.split("/")[-1].replace(".pt", "") for f in voice_files]
+    return voices
+
+def get_supported_languages() -> List[Dict[str, str]]:
+    """Infer supported languages from actual voice files in repository"""
+    try:
+        # Get voice files from repository
+        files = list_repo_files(repo_id="hexgrad/Kokoro-82M")
+        voice_files = [f for f in files if f.endswith(".pt") and "voices" in f]
+        
+        # Language mapping based on official Kokoro documentation
+        language_map = {
+            "a": {"name": "American English", "iso": "en-US"},
+            "b": {"name": "British English", "iso": "en-GB"},
+            "j": {"name": "Japanese", "iso": "ja-JP"},
+            "z": {"name": "Mandarin Chinese", "iso": "zh-CN"},
+            "e": {"name": "Spanish", "iso": "es-ES"},
+            "f": {"name": "French", "iso": "fr-FR"},
+            "h": {"name": "Hindi", "iso": "hi-IN"},
+            "i": {"name": "Italian", "iso": "it-IT"},
+            "p": {"name": "Brazilian Portuguese", "iso": "pt-BR"}
+        }
+        
+        # Extract language codes from voice file names
+        found_lang_codes = set()
+        for voice_file in voice_files:
+            voice_name = voice_file.split("/")[-1].replace(".pt", "")
+            if "_" in voice_name:
+                # Extract first character as language code (e.g., "af_heart" -> "a")
+                lang_code = voice_name[0]
+                found_lang_codes.add(lang_code)
+        
+        # Build language list for found codes
+        languages = []
+        for lang_code in sorted(found_lang_codes):
+            if lang_code in language_map:
+                lang_info = language_map[lang_code].copy()
+                lang_info["code"] = lang_code
+                languages.append(lang_info)
+        
+        return languages
+        
+    except Exception:
+        # Fallback to basic English if repository access fails
+        return [{"code": "a", "name": "American English", "iso": "en-US"}]
 
 @openai_router.post("/audio/speech")
 async def create_speech(request: OpenAISpeechRequest):
@@ -196,14 +255,24 @@ async def create_speech(request: OpenAISpeechRequest):
 async def list_voices():
     """OpenAI compatible voice listing endpoint"""
     try:
-        files = list_repo_files(repo_id="hexgrad/Kokoro-82M")
-        voice_files = [f for f in files if f.endswith(".pt") and "voices" in f]
-        voices = [f.split("/")[-1].replace(".pt", "") for f in voice_files]
+        voices = get_supported_voices()
         return OpenAIVoiceResponse(voices=voices)
     except Exception as e:
         raise HTTPException(
             status_code=500,
             detail={"error": {"message": f"Failed to list voices: {str(e)}", "type": "internal_server_error"}}
+        )
+
+@openai_router.get("/audio/languages", response_model=OpenAILanguageResponse)
+async def list_languages():
+    """OpenAI compatible language listing endpoint"""
+    try:
+        languages = get_supported_languages()
+        return OpenAILanguageResponse(languages=languages)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"message": f"Failed to list languages: {str(e)}", "type": "internal_server_error"}}
         )
 
 # Include OpenAI router in main app
