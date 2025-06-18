@@ -47,14 +47,12 @@ class TTSStreamRequest(BaseModel):
     speaker: str = "af_heart"
     speed: float = 1.0
     format: AudioFormat = AudioFormat.wav
-    split_pattern: str = r'[.!?]+\s*'
 
 class TTSStreamBlendRequest(BaseModel):
     text: str
     voice_weights: Dict[str, float]
     speed: float = 1.0
     format: AudioFormat = AudioFormat.wav
-    split_pattern: str = r'[.!?]+\s*'
 
 @app.get("/")
 async def root():
@@ -112,7 +110,7 @@ async def speak_blend(req: TTSBlendRequest):
 async def speak_stream(req: TTSStreamRequest):
     try:
         def generate_audio():
-            for audio_chunk in synthesize_streaming(req.text, req.speaker, req.speed, req.format.value, req.split_pattern):
+            for audio_chunk in synthesize_streaming(req.text, req.speaker, req.speed, req.format.value):
                 yield audio_chunk
         
         media_types = {
@@ -124,8 +122,9 @@ async def speak_stream(req: TTSStreamRequest):
             "pcm": "audio/pcm"
         }
         media_type = media_types.get(req.format.value, "audio/wav")
-        # No Content-Disposition header for true streaming
-        return StreamingResponse(generate_audio(), media_type=media_type)
+        file_name = f"speech_{req.speaker}.{req.format.value}"
+        headers = {"Content-Disposition": f'attachment; filename="{file_name}"'}
+        return StreamingResponse(generate_audio(), media_type=media_type, headers=headers)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -133,7 +132,7 @@ async def speak_stream(req: TTSStreamRequest):
 async def speak_stream_blend(req: TTSStreamBlendRequest):
     try:
         def generate_audio():
-            for audio_chunk in synthesize_streaming_with_voice_blend(req.text, req.voice_weights, req.speed, req.format.value, req.split_pattern):
+            for audio_chunk in synthesize_streaming_with_voice_blend(req.text, req.voice_weights, req.speed, req.format.value):
                 yield audio_chunk
         
         media_types = {
@@ -145,8 +144,12 @@ async def speak_stream_blend(req: TTSStreamBlendRequest):
             "pcm": "audio/pcm"
         }
         media_type = media_types.get(req.format.value, "audio/wav")
-        # No Content-Disposition header for true streaming
-        return StreamingResponse(generate_audio(), media_type=media_type)
+        headers = {
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Transfer-Encoding": "chunked"
+        }
+        return StreamingResponse(generate_audio(), media_type=media_type, headers=headers)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
