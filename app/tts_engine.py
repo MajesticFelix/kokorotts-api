@@ -69,7 +69,7 @@ def chunk_text(text: str, initial_chunk_size: int = 1000) -> List[str]:
 def audio_to_bytes(audio_data, target_format: str) -> bytes:
     """Convert targetted audio format array to bytes in memory (ffmpeg required for pydub)"""
     soundfile_formats = ["wav", "flac", "ogg"]
-    pydub_formats = ["mp3", "opus", "pcm"] # ffmpeg required
+    pydub_formats = ["mp3", "opus"] # ffmpeg required
 
     try: 
         if target_format.lower() in soundfile_formats:
@@ -88,8 +88,7 @@ def audio_to_bytes(audio_data, target_format: str) -> bytes:
             
             format_configs = {
                 "mp3": {"format": "mp3", "bitrate": "192k"},
-                "opus": {"format": "opus", "codec": "libopus"},
-                "pcm": {"format": "wav", "parameters": ["-acodec", "pcm_s16le"]}
+                "opus": {"format": "opus", "codec": "libopus"}
             }
 
             config = format_configs[target_format.lower()]
