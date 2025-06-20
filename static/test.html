@@ -1,0 +1,1031 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kokoro TTS API - Complete Test Suite</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #4a90e2 0%, #357abd 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .test-section {
+            margin-bottom: 40px;
+            padding: 25px;
+            border: 2px solid #e9ecef;
+            border-radius: 12px;
+            background: #f8f9fa;
+        }
+
+        .test-section h2 {
+            color: #2c3e50;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #4a90e2;
+            font-size: 1.5rem;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #495057;
+        }
+
+        .form-group input,
+        .form-group textarea,
+        .form-group select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+
+        .form-group input:focus,
+        .form-group textarea:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #4a90e2;
+            box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.1);
+        }
+
+        .form-group textarea {
+            height: 120px;
+            resize: vertical;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-decoration: none;
+            display: inline-block;
+            text-align: center;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #4a90e2 0%, #357abd 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(74, 144, 226, 0.3);
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+            transform: translateY(-2px);
+        }
+
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #218838;
+            transform: translateY(-2px);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        .status {
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            font-weight: 500;
+        }
+
+        .status.loading {
+            background: #fff3cd;
+            border: 2px solid #ffeaa7;
+            color: #856404;
+        }
+
+        .status.success {
+            background: #d4edda;
+            border: 2px solid #c3e6cb;
+            color: #155724;
+        }
+
+        .status.error {
+            background: #f8d7da;
+            border: 2px solid #f5c6cb;
+            color: #721c24;
+        }
+
+        .voice-blend-container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            border: 2px solid #e9ecef;
+        }
+
+        .voice-row {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 15px;
+            align-items: center;
+        }
+
+        .voice-row select {
+            flex: 1;
+        }
+
+        .voice-row input {
+            flex: 0 0 120px;
+        }
+
+        .voice-row .btn {
+            flex: 0 0 auto;
+            padding: 8px 15px;
+        }
+
+        .audio-player {
+            width: 100%;
+            margin: 20px 0;
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 10px;
+        }
+
+        .streaming-debug {
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 20px;
+            border-radius: 8px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            margin: 20px 0;
+        }
+
+        .streaming-debug pre {
+            white-space: pre-wrap;
+            margin: 0;
+        }
+
+        .api-info {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .info-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            border: 2px solid #e9ecef;
+        }
+
+        .info-card h3 {
+            color: #4a90e2;
+            margin-bottom: 10px;
+        }
+
+        .info-card ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .info-card li {
+            padding: 5px 0;
+            border-bottom: 1px solid #f1f3f4;
+        }
+
+        .info-card li:last-child {
+            border-bottom: none;
+        }
+
+        .info-card code {
+            background: #f8f9fa;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+            color: #e83e8c;
+        }
+
+        .quick-tests {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .performance-stats {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #4a90e2;
+            margin: 15px 0;
+        }
+
+        .performance-stats h4 {
+            color: #4a90e2;
+            margin-bottom: 10px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+        }
+
+        .stat-item {
+            text-align: center;
+            padding: 10px;
+            background: white;
+            border-radius: 6px;
+        }
+
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #4a90e2;
+        }
+
+        .stat-label {
+            font-size: 0.9rem;
+            color: #6c757d;
+        }
+
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 2rem;
+            }
+            
+            .form-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .voice-row {
+                flex-direction: column;
+                gap: 10px;
+            }
+            
+            .voice-row select,
+            .voice-row input,
+            .voice-row .btn {
+                flex: none;
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎤 Kokoro TTS API</h1>
+            <p>Complete Test Suite - OpenAI Compatible Endpoints</p>
+        </div>
+
+        <div class="content">
+            <!-- API Information -->
+            <div class="api-info">
+                <div class="info-card">
+                    <h3>📡 Available Endpoints</h3>
+                    <ul>
+                        <li><code>/v1/audio/speech</code> - Text to Speech</li>
+                        <li><code>/v1/audio/voices</code> - List Voices</li>
+                        <li><code>/v1/audio/languages</code> - List Languages</li>
+                    </ul>
+                </div>
+                <div class="info-card">
+                    <h3>🎭 Voice Examples</h3>
+                    <ul>
+                        <li><code>af_heart</code> - Single voice</li>
+                        <li><code>af_bella+af_sky</code> - Equal blend</li>
+                        <li><code>af_bella(2)+af_sky(1)</code> - Weighted</li>
+                    </ul>
+                </div>
+                <div class="info-card">
+                    <h3>🎵 Audio Formats</h3>
+                    <ul>
+                        <li><code>mp3</code> - MP3 Audio</li>
+                        <li><code>wav</code> - WAV Audio</li>
+                        <li><code>flac</code> - FLAC Audio</li>
+                        <li><code>ogg</code> - OGG Audio</li>
+                        <li><code>opus</code> - OPUS Audio</li>
+                    </ul>
+                </div>
+                <div class="info-card">
+                    <h3>⚡ Features</h3>
+                    <ul>
+                        <li>🔄 Streaming Audio</li>
+                        <li>🎭 Voice Blending</li>
+                        <li>⏱️ Speed Control</li>
+                        <li>📱 Mobile Friendly</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Quick Resource Tests -->
+            <div class="test-section">
+                <h2>🔧 API Resources</h2>
+                <div class="quick-tests">
+                    <button class="btn btn-secondary" onclick="loadVoices()">Load Voices</button>
+                    <button class="btn btn-secondary" onclick="loadLanguages()">Load Languages</button>
+                    <button class="btn btn-secondary" onclick="testConnection()">Test Connection</button>
+                </div>
+                <div id="resourceStatus" class="status" style="display: none;"></div>
+            </div>
+
+            <!-- Story Presets -->
+            <div class="test-section">
+                <h2>📚 Story Presets</h2>
+                <div class="quick-tests">
+                    <button class="btn btn-success" onclick="quickTest('short')">🏰 Short Story</button>
+                    <button class="btn btn-success" onclick="quickTest('medium')">🌪️ Medium Story</button>
+                    <button class="btn btn-success" onclick="quickTest('long')">🔍 Long Story</button>
+                </div>
+            </div>
+
+            <!-- Main TTS Test -->
+            <div class="test-section">
+                <h2>🎤 Text-to-Speech Generator</h2>
+                
+                <div class="form-group">
+                    <label for="textInput">Text to Convert:</label>
+                    <textarea id="textInput" placeholder="Enter text to convert to speech...">Welcome to the Kokoro TTS API test suite! This comprehensive test demonstrates high-quality text-to-speech generation with multiple voices and audio formats. Try the story presets below to experience engaging fictional narratives, or experiment with voice blending and different audio formats to explore the full capabilities of the system.</textarea>
+                </div>
+
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="voiceMode">Voice Configuration:</label>
+                        <select id="voiceMode" onchange="toggleVoiceMode()">
+                            <option value="single">Single Voice</option>
+                            <option value="blend">Voice Blending</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="audioFormat">Audio Format:</label>
+                        <select id="audioFormat">
+                            <option value="mp3">MP3</option>
+                            <option value="wav">WAV</option>
+                            <option value="flac">FLAC</option>
+                            <option value="ogg">OGG</option>
+                            <option value="opus">OPUS</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="speechSpeed">Speed (0.25 - 4.0):</label>
+                        <input type="number" id="speechSpeed" min="0.25" max="4.0" step="0.1" value="1.0">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="streamingMode">Generation Mode:</label>
+                        <select id="streamingMode">
+                            <option value="false">Standard (Complete)</option>
+                            <option value="true">Streaming (Real-time)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Single Voice Selection -->
+                <div id="singleVoiceSection" class="form-group">
+                    <label for="singleVoice">Select Voice:</label>
+                    <select id="singleVoice">
+                        <option value="af_heart">af_heart</option>
+                        <option value="af_sarah">af_sarah</option>
+                        <option value="am_adam">am_adam</option>
+                    </select>
+                </div>
+
+                <!-- Voice Blending Section -->
+                <div id="voiceBlendSection" class="voice-blend-container" style="display: none;">
+                    <h3>🎭 Voice Blending Configuration</h3>
+                    <div id="voiceBlendContainer">
+                        <div class="voice-row">
+                            <select class="voice-select">
+                                <option value="af_heart">af_heart</option>
+                                <option value="af_sarah">af_sarah</option>
+                                <option value="am_adam">am_adam</option>
+                            </select>
+                            <input type="number" class="voice-weight" placeholder="Weight" value="2" step="0.1" min="0">
+                            <button type="button" class="btn btn-secondary remove-voice" onclick="removeVoiceRow(this)" style="display: none;">Remove</button>
+                        </div>
+                        <div class="voice-row">
+                            <select class="voice-select">
+                                <option value="af_heart">af_heart</option>
+                                <option value="af_sarah" selected>af_sarah</option>
+                                <option value="am_adam">am_adam</option>
+                            </select>
+                            <input type="number" class="voice-weight" placeholder="Weight" value="1" step="0.1" min="0">
+                            <button type="button" class="btn btn-secondary remove-voice" onclick="removeVoiceRow(this)">Remove</button>
+                        </div>
+                    </div>
+                    <button type="button" class="btn btn-success" onclick="addVoiceRow()" style="margin-top: 10px;">+ Add Voice</button>
+                </div>
+
+                <button class="btn btn-primary" onclick="generateSpeech()" id="generateBtn">🎤 Generate Speech</button>
+
+                <div id="mainStatus"></div>
+
+                <!-- Performance Stats -->
+                <div id="performanceStats" class="performance-stats" style="display: none;">
+                    <h4>📊 Performance Statistics</h4>
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-value" id="statFirstAudio">--</div>
+                            <div class="stat-label">Time to First Audio</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="statTotalTime">--</div>
+                            <div class="stat-label">Total Generation</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="statChunks">--</div>
+                            <div class="stat-label">Chunks Received</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="statSize">--</div>
+                            <div class="stat-label">Audio Size</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Audio Player -->
+                <audio id="audioPlayer" class="audio-player" controls style="display: none;">
+                    Your browser does not support the audio element.
+                </audio>
+
+                <!-- Streaming Debug -->
+                <div id="streamingDebug" class="streaming-debug" style="display: none;">
+                    <strong>🔄 Streaming Debug Log:</strong>
+                    <pre id="debugLog"></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentAudioUrl = null;
+        let voiceRowCounter = 2;
+
+        // Initialize page
+        window.onload = function() {
+            toggleVoiceMode();
+            loadVoices();
+            updateRemoveButtons();
+        };
+
+        // Voice mode toggle
+        function toggleVoiceMode() {
+            const mode = document.getElementById('voiceMode').value;
+            const singleSection = document.getElementById('singleVoiceSection');
+            const blendSection = document.getElementById('voiceBlendSection');
+
+            if (mode === 'single') {
+                singleSection.style.display = 'block';
+                blendSection.style.display = 'none';
+            } else {
+                singleSection.style.display = 'none';
+                blendSection.style.display = 'block';
+            }
+        }
+
+        // Resource loading functions
+        async function loadVoices() {
+            const status = document.getElementById('resourceStatus');
+            showStatus('Loading available voices...', 'loading', 'resourceStatus');
+            
+            try {
+                const response = await fetch('/v1/audio/voices');
+                const data = await response.json();
+                const voices = data.voices;
+
+                // Update all voice dropdowns
+                updateVoiceDropdowns(voices);
+                
+                showStatus(`✅ Loaded ${voices.length} voices successfully`, 'success', 'resourceStatus');
+            } catch (error) {
+                showStatus(`❌ Error loading voices: ${error.message}`, 'error', 'resourceStatus');
+            }
+        }
+
+        async function loadLanguages() {
+            showStatus('Loading supported languages...', 'loading', 'resourceStatus');
+            
+            try {
+                const response = await fetch('/v1/audio/languages');
+                const data = await response.json();
+                const languages = data.languages;
+                
+                const langInfo = languages.map(lang => `${lang.name} (${lang.code})`).join(', ');
+                showStatus(`🌐 Supported languages: ${langInfo}`, 'success', 'resourceStatus');
+            } catch (error) {
+                showStatus(`❌ Error loading languages: ${error.message}`, 'error', 'resourceStatus');
+            }
+        }
+
+        async function testConnection() {
+            showStatus('Testing API connection...', 'loading', 'resourceStatus');
+            
+            try {
+                const response = await fetch('/');
+                const data = await response.json();
+                showStatus(`✅ API connection successful: ${data.message}`, 'success', 'resourceStatus');
+            } catch (error) {
+                showStatus(`❌ Connection failed: ${error.message}`, 'error', 'resourceStatus');
+            }
+        }
+
+        function updateVoiceDropdowns(voices) {
+            const singleVoice = document.getElementById('singleVoice');
+            const voiceSelects = document.querySelectorAll('.voice-select');
+
+            // Update single voice dropdown
+            const currentSingle = singleVoice.value;
+            singleVoice.innerHTML = '';
+            voices.forEach(voice => {
+                const option = document.createElement('option');
+                option.value = voice;
+                option.textContent = voice;
+                singleVoice.appendChild(option);
+            });
+            if (voices.includes(currentSingle)) {
+                singleVoice.value = currentSingle;
+            }
+
+            // Update voice blend dropdowns
+            voiceSelects.forEach((select, index) => {
+                const currentValue = select.value;
+                select.innerHTML = '';
+                voices.forEach(voice => {
+                    const option = document.createElement('option');
+                    option.value = voice;
+                    option.textContent = voice;
+                    select.appendChild(option);
+                });
+                
+                if (voices.includes(currentValue)) {
+                    select.value = currentValue;
+                } else if (voices.length > index) {
+                    select.value = voices[index];
+                }
+            });
+        }
+
+        // Voice blending functions
+        function addVoiceRow() {
+            voiceRowCounter++;
+            const container = document.getElementById('voiceBlendContainer');
+            
+            const row = document.createElement('div');
+            row.className = 'voice-row';
+            row.innerHTML = `
+                <select class="voice-select">
+                    <option value="af_heart">af_heart</option>
+                    <option value="af_sarah">af_sarah</option>
+                    <option value="am_adam">am_adam</option>
+                </select>
+                <input type="number" class="voice-weight" placeholder="Weight" value="1" step="0.1" min="0">
+                <button type="button" class="btn btn-secondary remove-voice" onclick="removeVoiceRow(this)">Remove</button>
+            `;
+            
+            container.appendChild(row);
+            
+            // Copy current voice options if already loaded
+            const firstSelect = container.querySelector('.voice-select');
+            const newSelect = row.querySelector('.voice-select');
+            if (firstSelect.options.length > 3) {
+                newSelect.innerHTML = firstSelect.innerHTML;
+            }
+            
+            updateRemoveButtons();
+        }
+
+        function removeVoiceRow(button) {
+            button.parentElement.remove();
+            updateRemoveButtons();
+        }
+
+        function updateRemoveButtons() {
+            const rows = document.querySelectorAll('#voiceBlendContainer .voice-row');
+            const removeButtons = document.querySelectorAll('.remove-voice');
+            
+            removeButtons.forEach((button, index) => {
+                if (rows.length <= 2) {
+                    button.style.display = 'none';
+                } else {
+                    button.style.display = index === 0 ? 'none' : 'inline-block';
+                }
+            });
+        }
+
+        // Voice specification builder
+        function buildVoiceSpec() {
+            const mode = document.getElementById('voiceMode').value;
+            
+            if (mode === 'single') {
+                return document.getElementById('singleVoice').value;
+            } else {
+                const selects = document.querySelectorAll('.voice-select');
+                const weights = document.querySelectorAll('.voice-weight');
+                
+                const parts = [];
+                selects.forEach((select, index) => {
+                    const voice = select.value;
+                    const weight = parseFloat(weights[index].value) || 1;
+                    if (voice && weight > 0) {
+                        parts.push(`${voice}(${weight})`);
+                    }
+                });
+                
+                return parts.length > 0 ? parts.join('+') : 'af_heart';
+            }
+        }
+
+        // Main speech generation
+        async function generateSpeech() {
+            const text = document.getElementById('textInput').value.trim();
+            const voiceSpec = buildVoiceSpec();
+            const format = document.getElementById('audioFormat').value;
+            const speed = parseFloat(document.getElementById('speechSpeed').value);
+            const streaming = document.getElementById('streamingMode').value === 'true';
+            
+            if (!text) {
+                showStatus('❌ Please enter some text to convert', 'error', 'mainStatus');
+                return;
+            }
+
+            const generateBtn = document.getElementById('generateBtn');
+            generateBtn.disabled = true;
+            generateBtn.textContent = streaming ? '🔄 Streaming...' : '⏳ Generating...';
+
+            // Reset audio player
+            resetAudioPlayer();
+
+            const payload = {
+                model: "kokoro",
+                input: text,
+                voice: voiceSpec,
+                response_format: format,
+                speed: speed,
+                stream: streaming
+            };
+
+            showStatus(`${streaming ? '🔄 Starting streaming' : '⏳ Generating'} with voice: ${voiceSpec}...`, 'loading', 'mainStatus');
+
+            try {
+                if (streaming) {
+                    await handleStreamingGeneration(payload);
+                } else {
+                    await handleStandardGeneration(payload);
+                }
+            } catch (error) {
+                showStatus(`❌ Generation failed: ${error.message}`, 'error', 'mainStatus');
+            } finally {
+                generateBtn.disabled = false;
+                generateBtn.textContent = '🎤 Generate Speech';
+            }
+        }
+
+        async function handleStandardGeneration(payload) {
+            const startTime = Date.now();
+            
+            const response = await fetch('/v1/audio/speech', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error?.message || `HTTP ${response.status}`);
+            }
+
+            const blob = await response.blob();
+            const endTime = Date.now();
+            const totalTime = (endTime - startTime) / 1000;
+
+            // Update performance stats
+            updatePerformanceStats({
+                firstAudio: totalTime,
+                totalTime: totalTime,
+                chunks: 1,
+                size: blob.size
+            });
+
+            // Setup audio player
+            const audioUrl = URL.createObjectURL(blob);
+            const audioPlayer = document.getElementById('audioPlayer');
+            audioPlayer.src = audioUrl;
+            audioPlayer.style.display = 'block';
+            
+            if (currentAudioUrl) {
+                URL.revokeObjectURL(currentAudioUrl);
+            }
+            currentAudioUrl = audioUrl;
+
+            showStatus(`✅ Audio generated in ${totalTime.toFixed(2)}s (${formatBytes(blob.size)})`, 'success', 'mainStatus');
+
+            // Auto-play
+            try {
+                await audioPlayer.play();
+            } catch (e) {
+                console.log('Auto-play prevented by browser');
+            }
+        }
+
+        async function handleStreamingGeneration(payload) {
+            const startTime = Date.now();
+            let firstChunkTime = null;
+            let chunkCount = 0;
+            let totalSize = 0;
+            const audioChunks = [];
+
+            // Show streaming debug
+            const debugContainer = document.getElementById('streamingDebug');
+            const debugLog = document.getElementById('debugLog');
+            debugContainer.style.display = 'block';
+            debugLog.textContent = '';
+
+            function addDebugLog(message) {
+                const timestamp = new Date().toLocaleTimeString();
+                debugLog.textContent += `[${timestamp}] ${message}\n`;
+                debugLog.scrollTop = debugLog.scrollHeight;
+            }
+
+            addDebugLog('🚀 Starting streaming request...');
+            addDebugLog(`📝 Request: ${JSON.stringify(payload, null, 2)}`);
+
+            const response = await fetch('/v1/audio/speech', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error?.message || `HTTP ${response.status}`);
+            }
+
+            const reader = response.body.getReader();
+            const audioPlayer = document.getElementById('audioPlayer');
+            audioPlayer.style.display = 'block';
+
+            addDebugLog('📡 Response received, starting chunk processing...');
+
+            let hasStartedPlaying = false;
+
+            while (true) {
+                const { done, value } = await reader.read();
+                
+                if (done) {
+                    const endTime = Date.now();
+                    const totalTime = (endTime - startTime) / 1000;
+                    const firstChunkDelay = firstChunkTime ? (firstChunkTime - startTime) / 1000 : totalTime;
+
+                    // Final audio update with complete stream
+                    try {
+                        const currentTime = audioPlayer.currentTime || 0;
+                        const wasPlaying = !audioPlayer.paused;
+                        
+                        const finalBlob = new Blob(audioChunks, { 
+                            type: `audio/${payload.response_format}` 
+                        });
+                        
+                        if (currentAudioUrl) {
+                            URL.revokeObjectURL(currentAudioUrl);
+                        }
+                        
+                        currentAudioUrl = URL.createObjectURL(finalBlob);
+                        audioPlayer.src = currentAudioUrl;
+                        audioPlayer.currentTime = currentTime;
+                        
+                        if (wasPlaying) {
+                            audioPlayer.play().catch(e => {
+                                addDebugLog(`⚠️ Final playback resume failed: ${e.message}`);
+                            });
+                        }
+                        
+                        addDebugLog(`🎯 Final update: Complete audio source set (${formatBytes(totalSize)})`);
+                    } catch (e) {
+                        addDebugLog(`❌ Final audio update failed: ${e.message}`);
+                    }
+
+                    addDebugLog(`✅ Streaming completed! Total: ${totalTime.toFixed(2)}s, Chunks: ${chunkCount}, Size: ${formatBytes(totalSize)}`);
+                    
+                    updatePerformanceStats({
+                        firstAudio: firstChunkDelay,
+                        totalTime: totalTime,
+                        chunks: chunkCount,
+                        size: totalSize
+                    });
+
+                    showStatus(`✅ Streaming completed in ${totalTime.toFixed(2)}s (${chunkCount} chunks, ${formatBytes(totalSize)})`, 'success', 'mainStatus');
+                    break;
+                }
+
+                const chunkTime = Date.now();
+                chunkCount++;
+                totalSize += value.length;
+                audioChunks.push(value);
+
+                if (!firstChunkTime) {
+                    firstChunkTime = chunkTime;
+                    const delay = (firstChunkTime - startTime) / 1000;
+                    addDebugLog(`🎯 FIRST CHUNK! Received in ${delay.toFixed(3)}s - Audio can start playing now!`);
+                }
+
+                const elapsed = (chunkTime - startTime) / 1000;
+                addDebugLog(`📦 Chunk ${chunkCount}: ${formatBytes(value.length)} (${elapsed.toFixed(3)}s, total: ${formatBytes(totalSize)})`);
+
+                // Update status periodically
+                if (chunkCount % 10 === 0 || chunkCount <= 5) {
+                    showStatus(`🔄 Streaming... chunk ${chunkCount} (${formatBytes(totalSize)} total)`, 'loading', 'mainStatus');
+                }
+
+                // Smart audio updates - start playback immediately, then update periodically
+                const shouldUpdate = chunkCount === 1 || chunkCount % 20 === 0;
+                
+                if (shouldUpdate) {
+                    try {
+                        const currentTime = audioPlayer.currentTime || 0;
+                        const wasPlaying = !audioPlayer.paused;
+                        
+                        const progressiveBlob = new Blob(audioChunks, { 
+                            type: `audio/${payload.response_format}` 
+                        });
+                        
+                        if (currentAudioUrl) {
+                            URL.revokeObjectURL(currentAudioUrl);
+                        }
+                        
+                        currentAudioUrl = URL.createObjectURL(progressiveBlob);
+                        audioPlayer.src = currentAudioUrl;
+                        
+                        if (chunkCount === 1) {
+                            // First chunk - start playback
+                            addDebugLog('🎵 Starting audio playback...');
+                            try {
+                                await audioPlayer.play();
+                                hasStartedPlaying = true;
+                                addDebugLog('✅ Audio playback started successfully!');
+                            } catch (e) {
+                                addDebugLog(`⚠️ Auto-play prevented: ${e.message}`);
+                            }
+                        } else {
+                            // Subsequent chunks - preserve playback state
+                            audioPlayer.currentTime = currentTime;
+                            if (wasPlaying) {
+                                audioPlayer.play().catch(e => {
+                                    addDebugLog(`⚠️ Playback resume failed: ${e.message}`);
+                                });
+                            }
+                        }
+                        
+                        addDebugLog(`🔄 Updated audio source (chunk ${chunkCount})`);
+                    } catch (e) {
+                        addDebugLog(`❌ Audio update failed: ${e.message}`);
+                    }
+                }
+            }
+        }
+
+        function resetAudioPlayer() {
+            const audioPlayer = document.getElementById('audioPlayer');
+            audioPlayer.pause();
+            audioPlayer.currentTime = 0;
+            
+            if (currentAudioUrl) {
+                URL.revokeObjectURL(currentAudioUrl);
+                currentAudioUrl = null;
+            }
+            
+            audioPlayer.src = '';
+            audioPlayer.style.display = 'none';
+            
+            // Hide debug and stats
+            document.getElementById('streamingDebug').style.display = 'none';
+            document.getElementById('performanceStats').style.display = 'none';
+        }
+
+        function updatePerformanceStats(stats) {
+            document.getElementById('statFirstAudio').textContent = `${stats.firstAudio.toFixed(2)}s`;
+            document.getElementById('statTotalTime').textContent = `${stats.totalTime.toFixed(2)}s`;
+            document.getElementById('statChunks').textContent = stats.chunks;
+            document.getElementById('statSize').textContent = formatBytes(stats.size);
+            document.getElementById('performanceStats').style.display = 'block';
+        }
+
+        // Quick test presets
+        function quickTest(type) {
+            const textInput = document.getElementById('textInput');
+            const voiceMode = document.getElementById('voiceMode');
+            const streamingMode = document.getElementById('streamingMode');
+            const audioFormat = document.getElementById('audioFormat');
+
+            switch (type) {
+                case 'short':
+                    textInput.value = "The old lighthouse keeper squinted through the morning fog as a mysterious ship approached the rocky shore. Captain Elara had been sailing for three weeks, searching for the legendary island of Whispers. Her compass spun wildly, but she trusted the ancient map tucked safely in her coat pocket. As the fog cleared, she gasped—before her stood towering crystal spires that seemed to hum with magical energy. The keeper smiled knowingly and waved her toward the hidden harbor, where adventure awaited among the singing stones and glowing tide pools.";
+                    streamingMode.value = 'false';
+                    break;
+                
+                case 'medium':
+                    textInput.value = "Deep in the Enchanted Valley, young Lyra discovered she could speak to the wind itself. It started on her sixteenth birthday when she heard whispers carrying secrets from distant lands. The wind told her of dragons sleeping beneath mountain peaks, of mermaids singing in forgotten caves, and of a darkness growing in the Shadow Realm that threatened all magical creatures. Lyra's grandmother had been the last Wind Whisperer, and now the ancient power had awakened within her granddaughter. With her loyal companion, a silver fox named Zephyr, Lyra embarked on a quest to unite the four elemental guardians. She would need to master her gift quickly, for the Shadow King's army was already marching toward the Valley, and only the combined power of earth, water, fire, and air could stop the approaching doom. As storm clouds gathered overhead, Lyra took her first step into a world of magic, mystery, and incredible danger.";
+                    streamingMode.value = 'false';
+                    break;
+                
+                case 'long':
+                    textInput.value = "In the sprawling metropolis of New Arcanum, where steam-powered airships soared between gleaming skyscrapers and magical energy flowed through crystal conduits, Detective Thorne Blackwood investigated the most peculiar case of his career. Someone was stealing dreams from the city's sleeping citizens, leaving them to wake each morning feeling empty and gray. The victims remembered nothing of their nocturnal visions, but witnesses reported seeing shimmering, ethereal wisps floating through bedroom windows in the dead of night. Thorne's investigation led him through the gaslit streets of the Merchant Quarter, past the towering Academy of Mystical Arts, and deep into the Underground Markets where forbidden knowledge was traded like currency. His partner, the brilliant artificer Maya Cogsworth, had designed a special device capable of tracking dream essence—a delicate contraption of brass gears and glowing gems that hummed with otherworldly energy. Together, they discovered that the dream thief was actually a heartbroken wizard named Morpheus Nightshade, who had lost his own ability to dream after a magical accident years ago. Desperate to experience the wonder of dreams once more, he had been collecting them in crystal vials, creating a vast library of stolen sleep visions in his hidden laboratory beneath the city. But when Thorne and Maya confronted him, they learned of an even greater threat: Morpheus had inadvertently awakened something ancient and hungry in the Dream Realm—a nightmare entity that fed on human imagination and was now seeping into the waking world. The three unlikely allies would need to venture into the ever-shifting landscape of dreams themselves, where logic held no sway and willpower was the only weapon against creatures of pure terror and wonder.";
+                    streamingMode.value = 'false';
+                    break;
+            }
+
+            // Scroll to the generate button
+            document.getElementById('generateBtn').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // Utility functions
+        function showStatus(message, type, containerId) {
+            const container = document.getElementById(containerId);
+            container.textContent = message;
+            container.className = `status ${type}`;
+            container.style.display = 'block';
+        }
+
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        }
+    </script>
+</body>
+</html>

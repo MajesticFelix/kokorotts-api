@@ -26,7 +26,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 @app.get("/")
 async def root():
     return {
@@ -40,9 +39,8 @@ async def root():
 
 @app.get("/test", response_class=HTMLResponse)
 async def test_page():
-    with open("static/test_streaming.html", "r") as f: # currently not implemented
+    with open("static/test.html", "r") as f:
         return HTMLResponse(content=f.read())
-
 
 # OpenAI Compatible API Models
 class OpenAISpeechRequest(BaseModel):
