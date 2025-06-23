@@ -380,6 +380,20 @@
                     </ul>
                 </div>
                 <div class="info-card">
+                    <h3>🌐 Languages</h3>
+                    <ul>
+                        <li><code>a</code> - American English</li>
+                        <li><code>b</code> - British English</li>
+                        <li><code>j</code> - Japanese</li>
+                        <li><code>z</code> - Mandarin Chinese</li>
+                        <li><code>e</code> - Spanish</li>
+                        <li><code>f</code> - French</li>
+                        <li><code>h</code> - Hindi</li>
+                        <li><code>i</code> - Italian</li>
+                        <li><code>p</code> - Portuguese</li>
+                    </ul>
+                </div>
+                <div class="info-card">
                     <h3>⚡ Features</h3>
                     <ul>
                         <li>🔄 Streaming Audio</li>
@@ -417,7 +431,7 @@
                 
                 <div class="form-group">
                     <label for="textInput">Text to Convert:</label>
-                    <textarea id="textInput" placeholder="Enter text to convert to speech...">Welcome to the Kokoro TTS API test suite! This comprehensive test demonstrates high-quality text-to-speech generation with multiple voices and audio formats. Try the story presets below to experience engaging fictional narratives, or experiment with voice blending and different audio formats to explore the full capabilities of the system.</textarea>
+                    <textarea id="textInput" placeholder="Enter text to convert to speech...">Try the story presets below to experience engaging fictional narratives, or experiment with voice blending and different audio formats to explore the full capabilities of the system.</textarea>
                 </div>
 
                 <div class="form-grid">
@@ -450,6 +464,21 @@
                         <select id="streamingMode">
                             <option value="false">Standard (Complete)</option>
                             <option value="true">Streaming (Real-time)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="languageSelect">Language:</label>
+                        <select id="languageSelect">
+                            <option value="a">American English</option>
+                            <option value="b">British English</option>
+                            <option value="j">Japanese</option>
+                            <option value="z">Mandarin Chinese</option>
+                            <option value="e">Spanish</option>
+                            <option value="f">French</option>
+                            <option value="h">Hindi</option>
+                            <option value="i">Italian</option>
+                            <option value="p">Brazilian Portuguese</option>
                         </select>
                     </div>
                 </div>
@@ -584,6 +613,18 @@
                 const data = await response.json();
                 const languages = data.languages;
                 
+                // Update language dropdown
+                const languageSelect = document.getElementById('languageSelect');
+                languageSelect.innerHTML = '';
+                
+                languages.forEach(lang => {
+                    const option = document.createElement('option');
+                    option.value = lang.code;
+                    option.textContent = lang.name;
+                    if (lang.code === 'a') option.selected = true; // Default to American English
+                    languageSelect.appendChild(option);
+                });
+                
                 const langInfo = languages.map(lang => `${lang.name} (${lang.code})`).join(', ');
                 showStatus(`🌐 Supported languages: ${langInfo}`, 'success', 'resourceStatus');
             } catch (error) {
@@ -716,6 +757,7 @@
             const format = document.getElementById('audioFormat').value;
             const speed = parseFloat(document.getElementById('speechSpeed').value);
             const streaming = document.getElementById('streamingMode').value === 'true';
+            const language = document.getElementById('languageSelect').value;
             
             if (!text) {
                 showStatus('❌ Please enter some text to convert', 'error', 'mainStatus');
@@ -735,7 +777,8 @@
                 voice: voiceSpec,
                 response_format: format,
                 speed: speed,
-                stream: streaming
+                stream: streaming,
+                language: language
             };
 
             showStatus(`${streaming ? '🔄 Starting streaming' : '⏳ Generating'} with voice: ${voiceSpec}...`, 'loading', 'mainStatus');

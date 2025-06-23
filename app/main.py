@@ -50,6 +50,7 @@ class OpenAISpeechRequest(BaseModel):
     response_format: Optional[str] = Field(default="mp3", description="Audio format: wav, mp3, flac, ogg, opus")
     speed: Optional[float] = Field(default=1.0, ge=0.25, le=4.0, description="Speech speed (0.25 to 4.0)")
     stream: Optional[bool] = Field(default=False, description="Enable streaming response")
+    language: Optional[str] = Field(default="a", description="Language code (a=American English, b=British English, j=Japanese, z=Chinese, e=Spanish, f=French, h=Hindi, i=Italian, p=Portuguese)")
 
 class OpenAIVoiceResponse(BaseModel):
     voices: List[str]
@@ -108,6 +109,20 @@ def get_supported_voices() -> List[str]:
     voices = [f.split("/")[-1].replace(".pt", "") for f in voice_files]
     return voices
 
+def get_language_map() -> Dict[str, Dict[str, str]]:
+    """Get the mapping of language codes to language information"""
+    return {
+        "a": {"name": "American English", "iso": "en-US"},
+        "b": {"name": "British English", "iso": "en-GB"},
+        "j": {"name": "Japanese", "iso": "ja-JP"},
+        "z": {"name": "Mandarin Chinese", "iso": "zh-CN"},
+        "e": {"name": "Spanish", "iso": "es-ES"},
+        "f": {"name": "French", "iso": "fr-FR"},
+        "h": {"name": "Hindi", "iso": "hi-IN"},
+        "i": {"name": "Italian", "iso": "it-IT"},
+        "p": {"name": "Brazilian Portuguese", "iso": "pt-BR"}
+    }
+
 def get_supported_languages() -> List[Dict[str, str]]:
     """Infer supported languages from actual voice files in repository"""
     try:
@@ -116,17 +131,7 @@ def get_supported_languages() -> List[Dict[str, str]]:
         voice_files = [f for f in files if f.endswith(".pt") and "voices" in f]
         
         # Language mapping based on official Kokoro documentation
-        language_map = {
-            "a": {"name": "American English", "iso": "en-US"},
-            "b": {"name": "British English", "iso": "en-GB"},
-            "j": {"name": "Japanese", "iso": "ja-JP"},
-            "z": {"name": "Mandarin Chinese", "iso": "zh-CN"},
-            "e": {"name": "Spanish", "iso": "es-ES"},
-            "f": {"name": "French", "iso": "fr-FR"},
-            "h": {"name": "Hindi", "iso": "hi-IN"},
-            "i": {"name": "Italian", "iso": "it-IT"},
-            "p": {"name": "Brazilian Portuguese", "iso": "pt-BR"}
-        }
+        language_map = get_language_map()
         
         # Extract language codes from voice file names
         found_lang_codes = set()
@@ -150,6 +155,19 @@ def get_supported_languages() -> List[Dict[str, str]]:
     except Exception:
         # Fallback to basic English if repository access fails
         return [{"code": "a", "name": "American English", "iso": "en-US"}]
+
+def validate_language_code(lang_code: str) -> str:
+    """Validate and normalize language code"""
+    if not lang_code:
+        return "a"  # Default to American English
+    
+    lang_code = lang_code.lower().strip()
+    language_map = get_language_map()
+    
+    if lang_code not in language_map:
+        raise ValueError(f"Unsupported language code: {lang_code}. Supported codes: {', '.join(language_map.keys())}")
+    
+    return lang_code
 
 @openai_router.post("/audio/speech")
 async def create_speech(request: OpenAISpeechRequest):
@@ -176,6 +194,8 @@ async def create_speech(request: OpenAISpeechRequest):
         )
     
     try:
+        # Validate language code
+        lang_code = validate_language_code(request.language)
         
         # Parse voice specification
         voice_spec = parse_voice_specification(request.voice)
@@ -189,13 +209,13 @@ async def create_speech(request: OpenAISpeechRequest):
                 if isinstance(voice_spec, dict):
                     # Voice blending with streaming
                     for chunk in synthesize_streaming_with_voice_blend(
-                        request.input, voice_spec, request.speed, request.response_format
+                        request.input, voice_spec, request.speed, request.response_format, lang_code
                     ):
                         yield chunk
                 else:
                     # Single voice streaming
                     for chunk in synthesize_streaming(
-                        request.input, voice_spec, request.speed, request.response_format
+                        request.input, voice_spec, request.speed, request.response_format, lang_code
                     ):
                         yield chunk
             
@@ -210,12 +230,12 @@ async def create_speech(request: OpenAISpeechRequest):
             if isinstance(voice_spec, dict):
                 # Voice blending
                 audio_bytes = synthesize_with_voice_blend(
-                    request.input, voice_spec, request.speed, request.response_format
+                    request.input, voice_spec, request.speed, request.response_format, lang_code
                 )
             else:
                 # Single voice
                 audio_bytes = synthesize(
-                    request.input, voice_spec, request.speed, request.response_format
+                    request.input, voice_spec, request.speed, request.response_format, lang_code
                 )
             
             audio_stream = io.BytesIO(audio_bytes)

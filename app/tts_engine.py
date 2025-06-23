@@ -4,9 +4,21 @@ import numpy as np
 from kokoro import KPipeline
 import soundfile as sf
 from pydub import AudioSegment
-from typing import Dict, Iterator, List
+from typing import Dict, Iterator, List, Optional
 
-pipeline = KPipeline(lang_code="a", device="cuda" if torch.cuda.is_available() else "cpu") # 'a' for American English
+# Global pipeline cache for different languages
+_pipelines: Dict[str, KPipeline] = {}
+_device = "cuda" if torch.cuda.is_available() else "cpu"
+
+def get_pipeline(lang_code: str = "a") -> KPipeline:
+    """Get or create a pipeline for the specified language code"""
+    if lang_code not in _pipelines:
+        print(f"Initializing pipeline for language: {lang_code}")
+        _pipelines[lang_code] = KPipeline(lang_code=lang_code, device=_device)
+    return _pipelines[lang_code]
+
+# Initialize default pipeline for backward compatibility
+pipeline = get_pipeline("a")
 
 def chunk_text(text: str, initial_chunk_size: int = 1000) -> List[str]:
     """Split text into manageable chunks to avoid token limits"""
@@ -136,22 +148,25 @@ def create_wav_streaming_header(sample_rate: int = 24000, channels: int = 1, bit
     
     return bytes(header)
 
-def synthesize(text: str, speaker: str, speed: float, format: str="wav") -> bytes:
+def synthesize(text: str, speaker: str, speed: float, format: str="wav", lang_code: str = "a") -> bytes:
     """Generate text-to-speech audio and return as bytes with automatic text chunking"""
     if not text.strip():
         raise ValueError("Text cannot be empty")
     
     try:
+        # Get pipeline for the specified language
+        lang_pipeline = get_pipeline(lang_code)
+        
         # Automatically chunk text to avoid token limits
         text_chunks = chunk_text(text, initial_chunk_size=800)  # Conservative size for stability
-        print(f"Split text into {len(text_chunks)} chunks for processing")
+        print(f"Split text into {len(text_chunks)} chunks for processing (lang: {lang_code})")
         
         all_audio_data = []
         
         for chunk_idx, chunk in enumerate(text_chunks):
             print(f"Processing chunk {chunk_idx + 1}/{len(text_chunks)}: {chunk[:50]}...")
             
-            generator = pipeline(chunk, speaker, speed)
+            generator = lang_pipeline(chunk, speaker, speed)
             for result in generator:
                 audio = result.audio.cpu().numpy()  # Convert to numpy array
                 print(f"Generated sub-chunk for chunk {chunk_idx + 1}: {len(audio)} samples")
@@ -168,7 +183,7 @@ def synthesize(text: str, speaker: str, speed: float, format: str="wav") -> byte
     except Exception as e:
         raise RuntimeError(f"Synthesis failed: {str(e)}")
 
-def synthesize_with_voice_blend(text: str, voice_weights: Dict[str, float], speed: float, format: str = "wav") -> bytes:
+def synthesize_with_voice_blend(text: str, voice_weights: Dict[str, float], speed: float, format: str = "wav", lang_code: str = "a") -> bytes:
     """Generate text-to-speech audio with blended voices and return as bytes with automatic text chunking"""
     if not text.strip():
         raise ValueError("Text cannot be empty")
@@ -184,10 +199,13 @@ def synthesize_with_voice_blend(text: str, voice_weights: Dict[str, float], spee
     normalized_weights = {voice: weight / total_weight for voice, weight in voice_weights.items()}
     
     try:
+        # Get pipeline for the specified language
+        lang_pipeline = get_pipeline(lang_code)
+        
         # Load and blend voice tensors
         blended_voice = None
         for voice_name, weight in normalized_weights.items():
-            voice_tensor = pipeline.load_voice(voice_name)
+            voice_tensor = lang_pipeline.load_voice(voice_name)
             if blended_voice is None:
                 blended_voice = weight * voice_tensor
             else:
@@ -195,14 +213,14 @@ def synthesize_with_voice_blend(text: str, voice_weights: Dict[str, float], spee
         
         # Automatically chunk text to avoid token limits
         text_chunks = chunk_text(text, initial_chunk_size=800)
-        print(f"Voice blend: Split text into {len(text_chunks)} chunks for processing")
+        print(f"Voice blend: Split text into {len(text_chunks)} chunks for processing (lang: {lang_code})")
         
         all_audio_data = []
         
         for chunk_idx, chunk in enumerate(text_chunks):
             print(f"Processing voice blend chunk {chunk_idx + 1}/{len(text_chunks)}: {chunk[:50]}...")
             
-            generator = pipeline(chunk, voice=blended_voice, speed=speed)
+            generator = lang_pipeline(chunk, voice=blended_voice, speed=speed)
             for result in generator:
                 audio = result.audio.cpu().numpy()  # Convert to numpy array
                 print(f"Generated sub-chunk for blend chunk {chunk_idx + 1}: {len(audio)} samples")
@@ -219,22 +237,25 @@ def synthesize_with_voice_blend(text: str, voice_weights: Dict[str, float], spee
     except Exception as e:
         raise RuntimeError(f"Voice blend synthesis failed: {str(e)}")
 
-def synthesize_streaming(text: str, speaker: str, speed: float, format: str = "wav") -> Iterator[bytes]:
+def synthesize_streaming(text: str, speaker: str, speed: float, format: str = "wav", lang_code: str = "a") -> Iterator[bytes]:
     """Generate text-to-speech audio in streaming chunks with automatic text chunking"""
     if not text.strip():
         raise ValueError("Text cannot be empty")
     
     try:
+        # Get pipeline for the specified language
+        lang_pipeline = get_pipeline(lang_code)
+        
         # Automatically chunk text to avoid token limits
         text_chunks = chunk_text(text, initial_chunk_size=800)
-        print(f"Streaming: Split text into {len(text_chunks)} chunks for processing")
+        print(f"Streaming: Split text into {len(text_chunks)} chunks for processing (lang: {lang_code})")
         
         chunk_counter = 0
         
         for chunk_idx, chunk in enumerate(text_chunks):
             print(f"Streaming chunk {chunk_idx + 1}/{len(text_chunks)}: {chunk[:50]}...")
             
-            generator = pipeline(chunk, speaker, speed)
+            generator = lang_pipeline(chunk, speaker, speed)
             for result in generator:
                 chunk_counter += 1
                 audio = result.audio.cpu().numpy()  # Convert to numpy array
@@ -254,7 +275,7 @@ def synthesize_streaming(text: str, speaker: str, speed: float, format: str = "w
     except Exception as e:
         raise RuntimeError(f"Streaming synthesis failed: {str(e)}")
 
-def synthesize_streaming_with_voice_blend(text: str, voice_weights: Dict[str, float], speed: float, format: str = "wav") -> Iterator[bytes]:
+def synthesize_streaming_with_voice_blend(text: str, voice_weights: Dict[str, float], speed: float, format: str = "wav", lang_code: str = "a") -> Iterator[bytes]:
     """Generate text-to-speech audio with blended voices in streaming chunks with automatic text chunking"""
     if not text.strip():
         raise ValueError("Text cannot be empty")
@@ -270,10 +291,13 @@ def synthesize_streaming_with_voice_blend(text: str, voice_weights: Dict[str, fl
     normalized_weights = {voice: weight / total_weight for voice, weight in voice_weights.items()}
     
     try:
+        # Get pipeline for the specified language
+        lang_pipeline = get_pipeline(lang_code)
+        
         # Load and blend voice tensors
         blended_voice = None
         for voice_name, weight in normalized_weights.items():
-            voice_tensor = pipeline.load_voice(voice_name)
+            voice_tensor = lang_pipeline.load_voice(voice_name)
             if blended_voice is None:
                 blended_voice = weight * voice_tensor
             else:
@@ -281,14 +305,14 @@ def synthesize_streaming_with_voice_blend(text: str, voice_weights: Dict[str, fl
         
         # Automatically chunk text to avoid token limits
         text_chunks = chunk_text(text, initial_chunk_size=800)
-        print(f"Streaming voice blend: Split text into {len(text_chunks)} chunks for processing")
+        print(f"Streaming voice blend: Split text into {len(text_chunks)} chunks for processing (lang: {lang_code})")
         
         chunk_counter = 0
         
         for chunk_idx, chunk in enumerate(text_chunks):
             print(f"Streaming voice blend chunk {chunk_idx + 1}/{len(text_chunks)}: {chunk[:50]}...")
             
-            generator = pipeline(chunk, voice=blended_voice, speed=speed)
+            generator = lang_pipeline(chunk, voice=blended_voice, speed=speed)
             for result in generator:
                 chunk_counter += 1
                 audio = result.audio.cpu().numpy()  # Convert to numpy array
