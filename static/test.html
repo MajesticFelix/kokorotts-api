@@ -22,6 +22,10 @@
                         <li><code>/v1/audio/speech</code> - Text to Speech</li>
                         <li><code>/v1/audio/voices</code> - List Voices</li>
                         <li><code>/v1/audio/languages</code> - List Languages</li>
+                        <li><code>/health</code> - Health Check</li>
+                        <li><code>/metrics</code> - System Metrics</li>
+                        <li><code>/pipeline/status</code> - Pipeline Status</li>
+                        <li><code>/debug</code> - Debug Info</li>
                     </ul>
                 </div>
                 <div class="info-card">
@@ -78,6 +82,19 @@
                 <div id="resourceStatus" class="status" style="display: none;"></div>
             </div>
 
+            <!-- Debug & Monitoring -->
+            <div class="test-section">
+                <h2>🔍 Debug & Monitoring</h2>
+                <div class="quick-tests">
+                    <button class="btn btn-secondary" onclick="checkHealth()">Health Check</button>
+                    <button class="btn btn-secondary" onclick="loadMetrics()">System Metrics</button>
+                    <button class="btn btn-secondary" onclick="loadPipelineStatus()">Pipeline Status</button>
+                    <button class="btn btn-secondary" onclick="loadDebugInfo()">Full Debug Info</button>
+                </div>
+                <div id="debugStatus" class="status" style="display: none;"></div>
+                <div id="debugDetails" class="debug-details" style="display: none;"></div>
+            </div>
+
             <!-- Story Presets -->
             <div class="test-section">
                 <h2>📚 Story Presets</h2>
@@ -94,7 +111,7 @@
                 
                 <div class="form-group">
                     <label for="textInput">Text to Convert:</label>
-                    <textarea id="textInput" placeholder="Enter text to convert to speech...">Try the story presets below to experience engaging fictional narratives, or experiment with voice blending and different audio formats to explore the full capabilities of the system.</textarea>
+                    <textarea id="textInput" placeholder="Enter text to convert to speech...">Try the story presets above to experience engaging fictional narratives, or experiment with voice blending and different audio formats to explore the full capabilities of the system.</textarea>
                 </div>
 
                 <div class="form-grid">
@@ -214,9 +231,9 @@
                     Your browser does not support the audio element.
                 </audio>
 
-                <!-- Streaming Debug -->
+                <!-- Generation Debug Log -->
                 <div id="streamingDebug" class="streaming-debug" style="display: none;">
-                    <strong>🔄 Streaming Debug Log:</strong>
+                    <strong id="debugTitle">🔄 Generation Debug Log:</strong>
                     <pre id="debugLog"></pre>
                 </div>
             </div>

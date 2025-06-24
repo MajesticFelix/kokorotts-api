@@ -237,6 +237,30 @@ async function generateSpeech() {
 async function handleStandardGeneration(payload) {
     const startTime = Date.now();
     
+    // Show debug log for standard generation
+    const debugContainer = document.getElementById('streamingDebug');
+    const debugTitle = document.getElementById('debugTitle');
+    const debugLog = document.getElementById('debugLog');
+    debugContainer.style.display = 'block';
+    debugTitle.textContent = '🎯 Standard Generation Debug Log:';
+    debugLog.textContent = '';
+
+    function addDebugLog(message) {
+        const timestamp = new Date().toLocaleTimeString();
+        debugLog.textContent += `[${timestamp}] ${message}\n`;
+        debugLog.scrollTop = debugLog.scrollHeight;
+    }
+
+    addDebugLog('🎯 Starting standard generation request...');
+    addDebugLog(`📝 Request: ${JSON.stringify(payload, null, 2)}`);
+    addDebugLog(`🔧 Language: ${payload.language}, Voice: ${payload.voice}, Format: ${payload.response_format}`);
+    addDebugLog(`⚡ Speed: ${payload.speed}x, Text length: ${payload.input.length} characters`);
+    
+    // Estimate text chunks (backend uses 800-char chunks)
+    const estimatedChunks = Math.ceil(payload.input.length / 800);
+    addDebugLog(`📊 Estimated text chunks: ${estimatedChunks} (backend uses ~800 char chunks)`);
+    addDebugLog(`🌐 Sending request to /v1/audio/speech...`);
+    
     const response = await fetch('/v1/audio/speech', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -245,12 +269,23 @@ async function handleStandardGeneration(payload) {
 
     if (!response.ok) {
         const error = await response.json();
+        addDebugLog(`❌ Request failed: HTTP ${response.status}`);
+        addDebugLog(`❌ Error: ${JSON.stringify(error, null, 2)}`);
         throw new Error(error.error?.message || `HTTP ${response.status}`);
     }
 
+    const responseTime = Date.now();
+    const requestTime = (responseTime - startTime) / 1000;
+    addDebugLog(`✅ Response received (HTTP ${response.status}) in ${requestTime.toFixed(3)}s`);
+    addDebugLog(`📊 Content-Type: ${response.headers.get('content-type')}`);
+    
     const blob = await response.blob();
     const endTime = Date.now();
     const totalTime = (endTime - startTime) / 1000;
+    const downloadTime = (endTime - responseTime) / 1000;
+
+    addDebugLog(`📦 Audio blob received: ${formatBytes(blob.size)}`);
+    addDebugLog(`⏱️ Download time: ${downloadTime.toFixed(3)}s, Total time: ${totalTime.toFixed(3)}s`);
 
     // Update performance stats
     updatePerformanceStats({
@@ -260,6 +295,8 @@ async function handleStandardGeneration(payload) {
         size: blob.size
     });
 
+    addDebugLog(`🎵 Creating audio URL and setting up player...`);
+
     // Setup audio player
     const audioUrl = URL.createObjectURL(blob);
     const audioPlayer = document.getElementById('audioPlayer');
@@ -268,15 +305,26 @@ async function handleStandardGeneration(payload) {
     
     if (currentAudioUrl) {
         URL.revokeObjectURL(currentAudioUrl);
+        addDebugLog(`🗑️ Cleaned up previous audio URL`);
     }
     currentAudioUrl = audioUrl;
+
+    addDebugLog(`✅ Standard generation completed successfully!`);
+    
+    // Calculate efficiency metrics
+    const throughputKBps = (blob.size / totalTime / 1024).toFixed(1);
+    const charsPerSecond = (payload.input.length / totalTime).toFixed(0);
+    addDebugLog(`📊 Throughput: ${throughputKBps} KB/s, ${charsPerSecond} chars/s`);
+    addDebugLog(`📊 Final stats: ${totalTime.toFixed(3)}s total, ${formatBytes(blob.size)} audio`);
 
     showStatus(`✅ Audio generated in ${totalTime.toFixed(2)}s (${formatBytes(blob.size)})`, 'success', 'mainStatus');
 
     // Auto-play
     try {
         await audioPlayer.play();
+        addDebugLog(`▶️ Audio playback started automatically`);
     } catch (e) {
+        addDebugLog(`⚠️ Auto-play prevented by browser: ${e.message}`);
         console.log('Auto-play prevented by browser');
     }
 }
@@ -290,8 +338,10 @@ async function handleStreamingGeneration(payload) {
 
     // Show streaming debug
     const debugContainer = document.getElementById('streamingDebug');
+    const debugTitle = document.getElementById('debugTitle');
     const debugLog = document.getElementById('debugLog');
     debugContainer.style.display = 'block';
+    debugTitle.textContent = '🔄 Streaming Generation Debug Log:';
     debugLog.textContent = '';
 
     function addDebugLog(message) {
@@ -505,4 +555,99 @@ function formatBytes(bytes) {
     const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+// Debug and Monitoring Functions
+async function checkHealth() {
+    showStatus('Checking API health...', 'loading', 'debugStatus');
+    
+    try {
+        const response = await fetch('/health');
+        const data = await response.json();
+        
+        const uptime = (data.uptime_seconds / 3600).toFixed(2);
+        showStatus(`✅ API Healthy - Uptime: ${uptime}h`, 'success', 'debugStatus');
+        
+        document.getElementById('debugDetails').style.display = 'block';
+        document.getElementById('debugDetails').innerHTML = `
+            <h4>🏥 Health Status</h4>
+            <pre>${JSON.stringify(data, null, 2)}</pre>
+        `;
+    } catch (error) {
+        showStatus(`❌ Health check failed: ${error.message}`, 'error', 'debugStatus');
+    }
+}
+
+async function loadMetrics() {
+    showStatus('Loading system metrics...', 'loading', 'debugStatus');
+    
+    try {
+        const response = await fetch('/metrics');
+        const data = await response.json();
+        
+        const cpu = data.cpu_percent.toFixed(1);
+        const memory = data.memory_percent.toFixed(1);
+        const gpuStatus = data.gpu_available ? `GPU: ${data.gpu_memory_used_mb.toFixed(0)}MB/${data.gpu_memory_total_mb.toFixed(0)}MB` : 'No GPU';
+        
+        showStatus(`📊 CPU: ${cpu}%, Memory: ${memory}%, ${gpuStatus}`, 'success', 'debugStatus');
+        
+        document.getElementById('debugDetails').style.display = 'block';
+        document.getElementById('debugDetails').innerHTML = `
+            <h4>📊 System Metrics</h4>
+            <pre>${JSON.stringify(data, null, 2)}</pre>
+        `;
+    } catch (error) {
+        showStatus(`❌ Failed to load metrics: ${error.message}`, 'error', 'debugStatus');
+    }
+}
+
+async function loadPipelineStatus() {
+    showStatus('Loading pipeline status...', 'loading', 'debugStatus');
+    
+    try {
+        const response = await fetch('/pipeline/status');
+        const data = await response.json();
+        
+        const languages = data.loaded_languages.join(', ');
+        showStatus(`🔧 ${data.pipeline_count} pipelines loaded (${languages}) on ${data.device}`, 'success', 'debugStatus');
+        
+        document.getElementById('debugDetails').style.display = 'block';
+        document.getElementById('debugDetails').innerHTML = `
+            <h4>🔧 Pipeline Status</h4>
+            <pre>${JSON.stringify(data, null, 2)}</pre>
+        `;
+    } catch (error) {
+        showStatus(`❌ Failed to load pipeline status: ${error.message}`, 'error', 'debugStatus');
+    }
+}
+
+async function loadDebugInfo() {
+    showStatus('Loading full debug information...', 'loading', 'debugStatus');
+    
+    try {
+        const response = await fetch('/debug');
+        const data = await response.json();
+        
+        const pythonVersion = data.system_info.python_version;
+        const torchVersion = data.system_info.torch_version;
+        const device = data.system_info.device;
+        
+        showStatus(`🔍 Python ${pythonVersion}, PyTorch ${torchVersion}, Device: ${device}`, 'success', 'debugStatus');
+        
+        document.getElementById('debugDetails').style.display = 'block';
+        document.getElementById('debugDetails').innerHTML = `
+            <h4>🔍 Complete Debug Information</h4>
+            
+            <h4>💻 System Information</h4>
+            <pre>${JSON.stringify(data.system_info, null, 2)}</pre>
+            
+            <h4>🔧 Pipeline Status</h4>
+            <pre>${JSON.stringify(data.pipeline_status, null, 2)}</pre>
+            
+            <h4>⚡ Performance Data</h4>
+            <pre>${JSON.stringify(data.recent_performance, null, 2)}</pre>
+        `;
+    } catch (error) {
+        showStatus(`❌ Failed to load debug info: ${error.message}`, 'error', 'debugStatus');
+    }
 }

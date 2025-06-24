@@ -3,16 +3,47 @@ from pydantic import BaseModel, Field
 from fastapi.responses import StreamingResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from .tts_engine import synthesize, synthesize_with_voice_blend, synthesize_streaming, synthesize_streaming_with_voice_blend
+from .tts_engine import synthesize, synthesize_with_voice_blend, synthesize_streaming, synthesize_streaming_with_voice_blend, _pipelines, _device
 from typing import Dict, Optional, Union, List
 from huggingface_hub import list_repo_files
 import io
 import re
+import psutil
+import torch
+import time
+from datetime import datetime
+
+# Global startup time tracker
+startup_time = time.time()
+
+tags_metadata = [
+    {
+        "name": "Root",
+        "description": "Main API information and navigation"
+    },
+    {
+        "name": "Audio",
+        "description": "Text-to-speech synthesis and voice management"
+    },
+    {
+        "name": "Testing",
+        "description": "Test interface and development tools"
+    },
+    {
+        "name": "Monitoring", 
+        "description": "Health checks and system metrics"
+    },
+    {
+        "name": "Debug",
+        "description": "Debugging and diagnostic information"
+    }
+]
 
 app = FastAPI(
     title="Kokoro TTS API", 
     version="1.0.0",
-    description="OpenAI-compatible TTS API using Kokoro model with voice blending support"
+    description="OpenAI-compatible TTS API using Kokoro model with voice blending support",
+    openapi_tags=tags_metadata
 )
 
 # Mount static files
@@ -26,7 +57,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/")
+@app.get("/", tags=["Root"])
 async def root():
     return {
         "message": "Kokoro TTS API is running!", 
@@ -34,10 +65,16 @@ async def root():
         "openai_endpoint": "/v1/audio/speech", 
         "voices_endpoint": "/v1/audio/voices", 
         "languages_endpoint": "/v1/audio/languages",
-        "test_page": "/test"
+        "test_page": "/test",
+        "monitoring": {
+            "health": "/health",
+            "metrics": "/metrics", 
+            "pipeline_status": "/pipeline/status",
+            "debug": "/debug"
+        }
     }
 
-@app.get("/test", response_class=HTMLResponse)
+@app.get("/test", response_class=HTMLResponse, tags=["Testing"])
 async def test_page():
     with open("static/test.html", "r") as f:
         return HTMLResponse(content=f.read())
@@ -57,6 +94,34 @@ class OpenAIVoiceResponse(BaseModel):
 
 class OpenAILanguageResponse(BaseModel):
     languages: List[Dict[str, str]]
+
+# Debug and Monitoring Response Models
+class HealthResponse(BaseModel):
+    status: str
+    timestamp: str
+    uptime_seconds: float
+    version: str
+
+class SystemMetricsResponse(BaseModel):
+    cpu_percent: float
+    memory_percent: float
+    memory_available_gb: float
+    disk_usage_percent: float
+    gpu_available: bool
+    gpu_memory_used_mb: Optional[float] = None
+    gpu_memory_total_mb: Optional[float] = None
+
+class PipelineStatusResponse(BaseModel):
+    loaded_languages: List[str]
+    default_language: str
+    device: str
+    pipeline_count: int
+    model_info: Dict[str, str]
+
+class DebugInfoResponse(BaseModel):
+    system_info: Dict[str, Union[str, float, bool]]
+    pipeline_status: Dict[str, Union[str, int, List[str]]]
+    recent_performance: Dict[str, Union[str, float]]
 
 # Create OpenAI compatible router
 openai_router = APIRouter(prefix="/v1")
@@ -169,7 +234,7 @@ def validate_language_code(lang_code: str) -> str:
     
     return lang_code
 
-@openai_router.post("/audio/speech")
+@openai_router.post("/audio/speech", tags=["Audio"])
 async def create_speech(request: OpenAISpeechRequest):
     """OpenAI compatible speech synthesis endpoint"""
     # Validate format first (before try block to avoid wrapping HTTPException)
@@ -269,7 +334,7 @@ async def create_speech(request: OpenAISpeechRequest):
             detail={"error": {"message": f"Internal server error: {str(e)}", "type": "internal_server_error"}}
         )
 
-@openai_router.get("/audio/voices", response_model=OpenAIVoiceResponse)
+@openai_router.get("/audio/voices", response_model=OpenAIVoiceResponse, tags=["Audio"])
 async def list_voices():
     """OpenAI compatible voice listing endpoint"""
     try:
@@ -281,7 +346,7 @@ async def list_voices():
             detail={"error": {"message": f"Failed to list voices: {str(e)}", "type": "internal_server_error"}}
         )
 
-@openai_router.get("/audio/languages", response_model=OpenAILanguageResponse)
+@openai_router.get("/audio/languages", response_model=OpenAILanguageResponse, tags=["Audio"])
 async def list_languages():
     """OpenAI compatible language listing endpoint"""
     try:
@@ -292,6 +357,102 @@ async def list_languages():
             status_code=500,
             detail={"error": {"message": f"Failed to list languages: {str(e)}", "type": "internal_server_error"}}
         )
+
+# Debug and Monitoring Endpoints
+@app.get("/health", response_model=HealthResponse, tags=["Monitoring"])
+async def health_check():
+    """Health check endpoint for monitoring"""
+    return HealthResponse(
+        status="healthy",
+        timestamp=datetime.now().isoformat(),
+        uptime_seconds=time.time() - startup_time,
+        version="1.0.0"
+    )
+
+@app.get("/metrics", response_model=SystemMetricsResponse, tags=["Monitoring"])
+async def system_metrics():
+    """System metrics endpoint for monitoring"""
+    # CPU and Memory metrics
+    cpu_percent = psutil.cpu_percent(interval=1)
+    memory = psutil.virtual_memory()
+    disk = psutil.disk_usage('/')
+    
+    # GPU metrics
+    gpu_available = torch.cuda.is_available()
+    gpu_memory_used_mb = None
+    gpu_memory_total_mb = None
+    
+    if gpu_available:
+        try:
+            gpu_memory_used_mb = torch.cuda.memory_allocated() / 1024 / 1024
+            gpu_memory_total_mb = torch.cuda.get_device_properties(0).total_memory / 1024 / 1024
+        except Exception:
+            pass
+    
+    return SystemMetricsResponse(
+        cpu_percent=cpu_percent,
+        memory_percent=memory.percent,
+        memory_available_gb=memory.available / (1024**3),
+        disk_usage_percent=disk.percent,
+        gpu_available=gpu_available,
+        gpu_memory_used_mb=gpu_memory_used_mb,
+        gpu_memory_total_mb=gpu_memory_total_mb
+    )
+
+@app.get("/pipeline/status", response_model=PipelineStatusResponse, tags=["Debug"])
+async def pipeline_status():
+    """Pipeline status endpoint for debugging"""
+    loaded_languages = list(_pipelines.keys())
+    
+    return PipelineStatusResponse(
+        loaded_languages=loaded_languages,
+        default_language="a",
+        device=_device,
+        pipeline_count=len(_pipelines),
+        model_info={
+            "model_name": "Kokoro-82M",
+            "model_size": "82M parameters",
+            "supported_languages": "9 languages"
+        }
+    )
+
+@app.get("/debug", response_model=DebugInfoResponse, tags=["Debug"])
+async def debug_info():
+    """Comprehensive debug information endpoint"""
+    # System info
+    memory = psutil.virtual_memory()
+    gpu_available = torch.cuda.is_available()
+    
+    system_info = {
+        "python_version": f"{psutil.sys.version_info.major}.{psutil.sys.version_info.minor}.{psutil.sys.version_info.micro}",
+        "cpu_count": psutil.cpu_count(),
+        "memory_total_gb": memory.total / (1024**3),
+        "gpu_available": gpu_available,
+        "torch_version": torch.__version__,
+        "device": _device,
+        "uptime_hours": (time.time() - startup_time) / 3600
+    }
+    
+    # Pipeline status
+    pipeline_status = {
+        "loaded_pipelines": list(_pipelines.keys()),
+        "pipeline_count": len(_pipelines),
+        "default_language": "a",
+        "device": _device
+    }
+    
+    # Performance info (placeholder for now)
+    recent_performance = {
+        "last_check": datetime.now().isoformat(),
+        "avg_generation_time": "N/A",
+        "requests_since_startup": "N/A"
+    }
+    
+    return DebugInfoResponse(
+        system_info=system_info,
+        pipeline_status=pipeline_status,
+        recent_performance=recent_performance
+    )
 
 # Include OpenAI router in main app
 app.include_router(openai_router)
