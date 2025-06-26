@@ -1,20 +1,47 @@
-from fastapi import FastAPI, HTTPException, APIRouter
-from pydantic import BaseModel, Field
-from fastapi.responses import StreamingResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
-from .tts_engine import _pipelines, _device, synthesize, synthesize_with_voice_blend, synthesize_streaming, synthesize_streaming_with_voice_blend
-from typing import Dict, Optional, Union, List
-from huggingface_hub import list_repo_files
+"""FastAPI application for KokoroTTS text-to-speech API.
+
+This module provides a REST API for text-to-speech synthesis with OpenAI-compatible
+endpoints, voice blending, streaming responses, and word-level timing information.
+"""
+
+import base64
 import io
+import json
+import logging
 import re
-import psutil
-import torch
 import time
 from datetime import datetime
+from typing import Dict, List, Optional, Union
+
+import psutil
+import torch
+from fastapi import FastAPI, HTTPException, APIRouter
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from huggingface_hub import list_repo_files
+from pydantic import BaseModel, Field
+
+from .tts_engine import (
+    _device,
+    _pipelines,
+    synthesize,
+    synthesize_streaming,
+    synthesize_streaming_with_voice_blend,
+    synthesize_with_voice_blend,
+)
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Global startup time tracker
 startup_time = time.time()
+
+# Constants
+SUPPORTED_FORMATS = ["wav", "mp3", "flac", "ogg", "opus"]
+MIN_SPEED = 0.25
+MAX_SPEED = 4.0
 
 tags_metadata = [
     {
@@ -40,10 +67,12 @@ tags_metadata = [
 ]
 
 app = FastAPI(
-    title="Kokoro TTS API", 
+    title="Kokoro TTS API",
     version="1.0.0",
     description="OpenAI-compatible TTS API using Kokoro model with voice blending support",
-    openapi_tags=tags_metadata
+    openapi_tags=tags_metadata,
+    docs_url="/docs",
+    redoc_url="/redoc",
 )
 
 # Mount static files
@@ -59,49 +88,87 @@ app.add_middleware(
 
 @app.get("/", tags=["Root"])
 async def root():
+    """Root endpoint providing API information and navigation."""
     return {
-        "message": "Kokoro TTS API is running!", 
-        "docs": "/docs", 
-        "openai_endpoint": "/v1/audio/speech", 
-        "voices_endpoint": "/v1/audio/voices", 
+        "message": "Kokoro TTS API is running!",
+        "docs": "/docs",
+        "openai_endpoint": "/v1/audio/speech",
+        "voices_endpoint": "/v1/audio/voices",
         "languages_endpoint": "/v1/audio/languages",
         "test_page": "/test",
         "monitoring": {
             "health": "/health",
-            "metrics": "/metrics", 
+            "metrics": "/metrics",
             "pipeline_status": "/pipeline/status",
-            "debug": "/debug"
-        }
+            "debug": "/debug",
+        },
     }
 
 @app.get("/test", response_class=HTMLResponse, tags=["Testing"])
 async def test_page():
-    with open("static/test.html", "r") as f:
-        return HTMLResponse(content=f.read())
+    """Serve the test page for trying out the TTS API."""
+    try:
+        with open("static/test.html", "r", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Test page not found")
 
 # OpenAI Compatible API Models
 class OpenAISpeechRequest(BaseModel):
-    model: str = Field(default="kokoro", description="TTS model to use")
-    input: str = Field(..., description="Text to convert to speech")
-    voice: str = Field(default="af_heart", description="Voice name or blended voices (e.g., 'af_bella+af_sky' or 'af_bella(2)+af_sky(1)')")
-    response_format: Optional[str] = Field(default="mp3", description="Audio format: wav, mp3, flac, ogg, opus")
-    speed: Optional[float] = Field(default=1.0, ge=0.25, le=4.0, description="Speech speed (0.25 to 4.0)")
-    stream: Optional[bool] = Field(default=False, description="Enable streaming response")
-    include_captions: Optional[bool] = Field(default=False, description="Include per-word timing information in response")
-    language: Optional[str] = Field(default="a", description="Language code (a=American English, b=British English, j=Japanese, z=Chinese, e=Spanish, f=French, h=Hindi, i=Italian, p=Portuguese)")
+    """OpenAI-compatible speech synthesis request model."""
+    
+    model: str = Field(
+        default="kokoro", 
+        description="TTS model to use"
+    )
+    input: str = Field(
+        ..., 
+        description="Text to convert to speech",
+        min_length=1,
+        max_length=10000
+    )
+    voice: str = Field(
+        default="af_heart", 
+        description="Voice name or blended voices (e.g., 'af_bella+af_sky' or 'af_bella(2)+af_sky(1)')"
+    )
+    response_format: Optional[str] = Field(
+        default="mp3", 
+        description="Audio format: wav, mp3, flac, ogg, opus"
+    )
+    speed: Optional[float] = Field(
+        default=1.0, 
+        ge=MIN_SPEED, 
+        le=MAX_SPEED, 
+        description=f"Speech speed ({MIN_SPEED} to {MAX_SPEED})"
+    )
+    stream: Optional[bool] = Field(
+        default=False, 
+        description="Enable streaming response"
+    )
+    include_captions: Optional[bool] = Field(
+        default=False, 
+        description="Include per-word timing information in response"
+    )
+    language: Optional[str] = Field(
+        default="a", 
+        description="Language code (a=American English, b=British English, j=Japanese, z=Chinese, e=Spanish, f=French, h=Hindi, i=Italian, p=Portuguese)"
+    )
 
 class OpenAIVoiceResponse(BaseModel):
-    voices: List[str]
+    """Response model for voice listing endpoint."""
+    voices: List[str] = Field(..., description="List of available voice names")
 
 class OpenAILanguageResponse(BaseModel):
-    languages: List[Dict[str, str]]
+    """Response model for language listing endpoint."""
+    languages: List[Dict[str, str]] = Field(..., description="List of supported languages")
 
 # Debug and Monitoring Response Models
 class HealthResponse(BaseModel):
-    status: str
-    timestamp: str
-    uptime_seconds: float
-    version: str
+    """Health check response model."""
+    status: str = Field(..., description="Service status")
+    timestamp: str = Field(..., description="Current timestamp")
+    uptime_seconds: float = Field(..., description="Service uptime in seconds")
+    version: str = Field(..., description="API version")
 
 class SystemMetricsResponse(BaseModel):
     cpu_percent: float
@@ -145,12 +212,21 @@ class CaptionedSpeechResponse(BaseModel):
 openai_router = APIRouter(prefix="/v1")
 
 def parse_voice_specification(voice_spec: str) -> Union[str, Dict[str, float]]:
-    """Parse OpenAI voice specification into voice name or voice weights dict
+    """Parse OpenAI voice specification into voice name or voice weights dict.
     
+    Args:
+        voice_spec: Voice specification string
+        
+    Returns:
+        Single voice name or dictionary of voice weights
+        
     Examples:
-    - 'af_bella' -> 'af_bella'
-    - 'af_bella+af_sky' -> {'af_bella': 0.5, 'af_sky': 0.5}
-    - 'af_bella(2)+af_sky(1)' -> {'af_bella': 0.67, 'af_sky': 0.33}
+        - 'af_bella' -> 'af_bella'
+        - 'af_bella+af_sky' -> {'af_bella': 0.5, 'af_sky': 0.5}
+        - 'af_bella(2)+af_sky(1)' -> {'af_bella': 0.67, 'af_sky': 0.33}
+        
+    Raises:
+        ValueError: If voice specification format is invalid
     """
     if '+' not in voice_spec:
         return voice_spec.strip()
@@ -175,25 +251,72 @@ def parse_voice_specification(voice_spec: str) -> Union[str, Dict[str, float]]:
     return voice_weights
 
 def get_media_type(format_name: str) -> str:
-    """Get proper media type for audio format"""
+    """Get proper media type for audio format.
+    
+    Args:
+        format_name: Audio format name
+        
+    Returns:
+        MIME type string for the format
+    """
     media_types = {
         "wav": "audio/wav",
-        "flac": "audio/flac", 
+        "flac": "audio/flac",
         "ogg": "audio/ogg",
         "mp3": "audio/mpeg",
-        "opus": "audio/opus"
+        "opus": "audio/opus",
     }
     return media_types.get(format_name.lower(), "audio/mpeg")
 
+# Cache for voice list to avoid repeated API calls
+_voice_cache: Optional[List[str]] = None
+_voice_cache_time: Optional[float] = None
+VOICE_CACHE_DURATION = 3600  # 1 hour
+
 def get_supported_voices() -> List[str]:
-    """Get list of supported voices from repository"""
-    files = list_repo_files(repo_id="hexgrad/Kokoro-82M")
-    voice_files = [f for f in files if f.endswith(".pt") and "voices" in f]
-    voices = [f.split("/")[-1].replace(".pt", "") for f in voice_files]
-    return voices
+    """Get list of supported voices from repository.
+    
+    Returns:
+        List of available voice names
+        
+    Raises:
+        RuntimeError: If unable to fetch voice list
+    """
+    global _voice_cache, _voice_cache_time
+    
+    # Use cached result if available and not expired
+    current_time = time.time()
+    if (
+        _voice_cache is not None
+        and _voice_cache_time is not None
+        and current_time - _voice_cache_time < VOICE_CACHE_DURATION
+    ):
+        return _voice_cache
+    
+    try:
+        files = list_repo_files(repo_id="hexgrad/Kokoro-82M")
+        voice_files = [f for f in files if f.endswith(".pt") and "voices" in f]
+        voices = [f.split("/")[-1].replace(".pt", "") for f in voice_files]
+        
+        # Cache the result
+        _voice_cache = voices
+        _voice_cache_time = current_time
+        
+        return voices
+    except Exception as e:
+        logger.error(f"Failed to fetch voice list: {e}")
+        # Return cached result if available, otherwise raise
+        if _voice_cache is not None:
+            logger.warning("Using cached voice list due to fetch failure")
+            return _voice_cache
+        raise RuntimeError(f"Unable to fetch voice list: {e}") from e
 
 def get_language_map() -> Dict[str, Dict[str, str]]:
-    """Get the mapping of language codes to language information"""
+    """Get the mapping of language codes to language information.
+    
+    Returns:
+        Dictionary mapping language codes to language metadata
+    """
     return {
         "a": {"name": "American English", "iso": "en-US"},
         "b": {"name": "British English", "iso": "en-GB"},
@@ -207,7 +330,11 @@ def get_language_map() -> Dict[str, Dict[str, str]]:
     }
 
 def get_supported_languages() -> List[Dict[str, str]]:
-    """Infer supported languages from actual voice files in repository"""
+    """Infer supported languages from actual voice files in repository.
+    
+    Returns:
+        List of language information dictionaries
+    """
     try:
         # Get voice files from repository
         files = list_repo_files(repo_id="hexgrad/Kokoro-82M")
@@ -240,7 +367,17 @@ def get_supported_languages() -> List[Dict[str, str]]:
         return [{"code": "a", "name": "American English", "iso": "en-US"}]
 
 def validate_language_code(lang_code: str) -> str:
-    """Validate and normalize language code"""
+    """Validate and normalize language code.
+    
+    Args:
+        lang_code: Input language code
+        
+    Returns:
+        Validated and normalized language code
+        
+    Raises:
+        ValueError: If language code is not supported
+    """
     if not lang_code:
         return "a"  # Default to American English
     
@@ -254,12 +391,33 @@ def validate_language_code(lang_code: str) -> str:
 
 @openai_router.post("/audio/speech", tags=["Audio"], response_model=None)
 async def create_speech(request: OpenAISpeechRequest):
-    """OpenAI compatible speech synthesis endpoint"""
+    """OpenAI compatible speech synthesis endpoint.
+    
+    Generates speech from text using KokoroTTS with support for:
+    - Multiple voices and voice blending
+    - Streaming and non-streaming responses
+    - Word-level timing captions
+    - Multiple audio formats
+    
+    Args:
+        request: Speech synthesis request parameters
+        
+    Returns:
+        Audio data (streaming or complete) or captioned response
+        
+    Raises:
+        HTTPException: For validation errors or synthesis failures
+    """
     # Validate format first (before try block to avoid wrapping HTTPException)
-    if request.response_format not in ["wav", "mp3", "flac", "ogg", "opus"]:
+    if request.response_format not in SUPPORTED_FORMATS:
         raise HTTPException(
             status_code=400,
-            detail={"error": {"message": f"Unsupported response_format: {request.response_format}", "type": "invalid_request_error"}}
+            detail={
+                "error": {
+                    "message": f"Unsupported response_format: {request.response_format}. Supported: {', '.join(SUPPORTED_FORMATS)}",
+                    "type": "invalid_request_error",
+                }
+            },
         )
     
     # Validate input text
@@ -270,13 +428,25 @@ async def create_speech(request: OpenAISpeechRequest):
         )
     
     # Validate speed parameter
-    if not (0.25 <= request.speed <= 4.0):
+    if not (MIN_SPEED <= request.speed <= MAX_SPEED):
         raise HTTPException(
             status_code=400,
-            detail={"error": {"message": "Speed must be between 0.25 and 4.0", "type": "invalid_request_error"}}
+            detail={
+                "error": {
+                    "message": f"Speed must be between {MIN_SPEED} and {MAX_SPEED}",
+                    "type": "invalid_request_error",
+                }
+            },
         )
     
     try:
+        # Log request details
+        logger.info(
+            f"Speech synthesis request: voice={request.voice}, format={request.response_format}, "
+            f"speed={request.speed}, stream={request.stream}, captions={request.include_captions}, "
+            f"lang={request.language}, text_length={len(request.input)}"
+        )
+        
         # Validate language code
         lang_code = validate_language_code(request.language)
         
@@ -290,8 +460,6 @@ async def create_speech(request: OpenAISpeechRequest):
             if request.include_captions:
                 # Streaming response with captions (JSON format)
                 def generate_caption_chunks():
-                    import json
-                    import base64
                     
                     if isinstance(voice_spec, dict):
                         # Voice blending with streaming captions
@@ -413,8 +581,7 @@ async def create_speech(request: OpenAISpeechRequest):
                 
                 # For read-along functionality, we need to include the audio data
                 # Encode audio bytes as base64 for JSON response
-                import base64
-                audio_data_b64 = base64.b64encode(synthesis_result.audio_bytes).decode('utf-8')
+                audio_data_b64 = base64.b64encode(synthesis_result.audio_bytes).decode("utf-8")
                 
                 return CaptionedSpeechResponse(
                     audio_url=None,  # Direct audio data, no URL needed
@@ -450,6 +617,7 @@ async def create_speech(request: OpenAISpeechRequest):
                 audio_stream = io.BytesIO(audio_bytes)
                 filename = f"speech.{request.response_format}"
                 headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+                logger.info(f"Generated audio: {len(audio_bytes)} bytes, format={request.response_format}")
                 return StreamingResponse(audio_stream, media_type=media_type, headers=headers)
             
     except ValueError as e:

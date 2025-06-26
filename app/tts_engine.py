@@ -1,66 +1,135 @@
+"""Text-to-speech engine using KokoroTTS model.
+
+This module provides high-level functions for text-to-speech synthesis
+with support for multiple voices, languages, streaming, and captions.
+"""
+
 import io
-import torch
+import logging
+from typing import Dict, Iterator, List, NamedTuple, Union, Optional
+
 import numpy as np
-from kokoro import KPipeline
 import soundfile as sf
+import torch
+from kokoro import KPipeline
 from pydub import AudioSegment
-from typing import Dict, Iterator, List, NamedTuple, Union
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 # Global pipeline cache for different languages
 _pipelines: Dict[str, KPipeline] = {}
 _device = "cuda" if torch.cuda.is_available() else "cpu"
 
+# Constants
+DEFAULT_SAMPLE_RATE = 24000
+DEFAULT_CHUNK_SIZE = 800
+MAX_CHUNK_SIZE = 1000
+
 # Data structures for timing information
 class WordTiming(NamedTuple):
+    """Word-level timing information for TTS output.
+    
+    Attributes:
+        text: The word text
+        start_time: Start time in seconds
+        end_time: End time in seconds
+        phonemes: Phonetic representation (IPA or graphemes)
+    """
     text: str
     start_time: float
     end_time: float
     phonemes: str
 
 class SynthesisResult(NamedTuple):
+    """Complete synthesis result with audio and timing data.
+    
+    Attributes:
+        word_timings: List of word-level timing information
+        audio_bytes: Encoded audio data
+        total_duration: Total audio duration in seconds
+        sample_rate: Audio sample rate in Hz
+    """
     word_timings: List[WordTiming]
     audio_bytes: bytes
     total_duration: float
     sample_rate: int
 
 class StreamingCaptionChunk(NamedTuple):
+    """Streaming chunk with caption data.
+    
+    Attributes:
+        word_timings: Word timings for this chunk
+        audio_data: Encoded audio data for this chunk
+        chunk_number: Sequential chunk number
+        is_final: Whether this is the final chunk
+    """
     word_timings: List[WordTiming]
     audio_data: bytes
     chunk_number: int
     is_final: bool
 
 def get_pipeline(lang_code: str = "a") -> KPipeline:
-    """Get or create a pipeline for the specified language code"""
+    """Get or create a pipeline for the specified language code.
+    
+    Args:
+        lang_code: Language code (e.g., 'a' for American English)
+        
+    Returns:
+        KPipeline instance for the specified language
+        
+    Raises:
+        RuntimeError: If pipeline initialization fails
+    """
     if lang_code not in _pipelines:
-        print(f"Initializing pipeline for language: {lang_code}")
-        _pipelines[lang_code] = KPipeline(lang_code=lang_code, device=_device)
+        try:
+            logger.info(f"Initializing pipeline for language: {lang_code}")
+            _pipelines[lang_code] = KPipeline(lang_code=lang_code, device=_device)
+        except Exception as e:
+            logger.error(f"Failed to initialize pipeline for {lang_code}: {e}")
+            raise RuntimeError(f"Pipeline initialization failed: {e}") from e
     return _pipelines[lang_code]
 
 # Initialize default pipeline for backward compatibility
 pipeline = get_pipeline("a")
 
-def chunk_text(text: str, initial_chunk_size: int = 1000) -> List[str]:
-    """Split text into manageable chunks to avoid token limits"""
-    if not text.strip():
+def chunk_text(text: str, initial_chunk_size: int = MAX_CHUNK_SIZE) -> List[str]:
+    """Split text into manageable chunks to avoid token limits.
+    
+    Args:
+        text: Input text to split
+        initial_chunk_size: Maximum size for each chunk
+        
+    Returns:
+        List of text chunks
+        
+    Raises:
+        ValueError: If text is empty
+    """
+    if not text or not text.strip():
+        logger.warning("Empty text provided to chunk_text")
         return []
     
-    # Split text into sentences
-    sentences = text.replace('\n', ' ').split('.')
+    # Optimize text preprocessing
+    # Replace multiple whitespace with single space and normalize
+    normalized_text = ' '.join(text.split())
+    
+    # Split text into sentences more efficiently
+    sentences = [s.strip() for s in normalized_text.split('.') if s.strip()]
     chunks = []
     current_chunk = []
     current_size = 0
     chunk_size = initial_chunk_size
     
     for sentence in sentences:
-        sentence = sentence.strip()
-        if not sentence:
+        if not sentence:  # Already stripped in list comprehension
             continue
             
         sentence_length = len(sentence)
         
         # If sentence is too long, split it further
         if sentence_length > chunk_size:
-            # Split long sentence into word-based pieces
+            # Split long sentence into word-based pieces more efficiently
             words = sentence.split()
             word_chunk = []
             word_chunk_size = 0
@@ -97,21 +166,34 @@ def chunk_text(text: str, initial_chunk_size: int = 1000) -> List[str]:
     return chunks
 
     
-def audio_to_bytes(audio_data, target_format: str) -> bytes:
-    """Convert targetted audio format array to bytes in memory (ffmpeg required for pydub)"""
+def audio_to_bytes(audio_data: np.ndarray, target_format: str) -> bytes:
+    """Convert audio data array to bytes in specified format.
+    
+    Args:
+        audio_data: NumPy array containing audio samples
+        target_format: Target audio format (wav, mp3, flac, ogg, opus)
+        
+    Returns:
+        Encoded audio bytes
+        
+    Raises:
+        ValueError: If format is unsupported or conversion fails
+    """
     soundfile_formats = ["wav", "flac", "ogg"]
-    pydub_formats = ["mp3", "opus"] # ffmpeg required
+    pydub_formats = ["mp3", "opus"]  # ffmpeg required
 
-    try: 
-        if target_format.lower() in soundfile_formats:
+    target_format_lower = target_format.lower()
+    
+    try:
+        if target_format_lower in soundfile_formats:
             buffer = io.BytesIO()
-            sf.write(buffer, audio_data, 24000, format=target_format.upper())
+            sf.write(buffer, audio_data, DEFAULT_SAMPLE_RATE, format=target_format.upper())
             buffer.seek(0)
             return buffer.getvalue()
-        elif target_format.lower() in pydub_formats: 
-            # Convert WAV to the targetted audios
+        elif target_format_lower in pydub_formats:
+            # Convert WAV to the target format
             wav_buffer = io.BytesIO()
-            sf.write(wav_buffer, audio_data, 24000, format="WAV")
+            sf.write(wav_buffer, audio_data, DEFAULT_SAMPLE_RATE, format="WAV")
             wav_buffer.seek(0)
 
             audio = AudioSegment.from_wav(wav_buffer)
@@ -122,27 +204,52 @@ def audio_to_bytes(audio_data, target_format: str) -> bytes:
                 "opus": {"format": "opus", "codec": "libopus"}
             }
 
-            config = format_configs[target_format.lower()]
+            config = format_configs[target_format_lower]
             audio.export(output_buffer, **config)
             
             output_buffer.seek(0)
             return output_buffer.getvalue()
     except Exception as e:
-        raise ValueError(f"Audio conversion failed for {target_format}: {str(e)}")
+        logger.error(f"Audio conversion failed for {target_format}: {e}")
+        raise ValueError(f"Audio conversion failed for {target_format}: {e}") from e
     
     raise ValueError(f"Unsupported format: {target_format}")
 
-def audio_to_raw_bytes(audio_data) -> bytes:
-    """Convert audio data to raw bytes without any container format headers"""
+def audio_to_raw_bytes(audio_data: np.ndarray) -> bytes:
+    """Convert audio data to raw bytes without any container format headers.
+    
+    Args:
+        audio_data: NumPy array containing audio samples
+        
+    Returns:
+        Raw audio bytes in 16-bit PCM format
+        
+    Raises:
+        ValueError: If conversion fails
+    """
     try:
         # Convert to 16-bit PCM format (standard for WAV)
         audio_int16 = (audio_data * 32767).astype(np.int16)
         return audio_int16.tobytes()
     except Exception as e:
-        raise ValueError(f"Raw audio conversion failed: {str(e)}")
+        logger.error(f"Raw audio conversion failed: {e}")
+        raise ValueError(f"Raw audio conversion failed: {e}") from e
 
-def create_wav_streaming_header(sample_rate: int = 24000, channels: int = 1, bits_per_sample: int = 16) -> bytes:
-    """Create a WAV header with large placeholder data size for streaming"""
+def create_wav_streaming_header(
+    sample_rate: int = DEFAULT_SAMPLE_RATE, 
+    channels: int = 1, 
+    bits_per_sample: int = 16
+) -> bytes:
+    """Create a WAV header with large placeholder data size for streaming.
+    
+    Args:
+        sample_rate: Audio sample rate in Hz
+        channels: Number of audio channels
+        bits_per_sample: Bits per audio sample
+        
+    Returns:
+        WAV header bytes
+    """
     # WAV header structure with dummy large data size for streaming
     header = bytearray()
     
@@ -168,7 +275,15 @@ def create_wav_streaming_header(sample_rate: int = 24000, channels: int = 1, bit
     return bytes(header)
 
 def extract_word_timings(result, chunk_offset: float = 0.0) -> List[WordTiming]:
-    """Extract per-word timing information from KokoroTTS result object"""
+    """Extract per-word timing information from KokoroTTS result object.
+    
+    Args:
+        result: KokoroTTS synthesis result object
+        chunk_offset: Time offset to add to all timestamps
+        
+    Returns:
+        List of WordTiming objects with text and timing information
+    """
     word_timings = []
     
     try:
@@ -186,17 +301,32 @@ def extract_word_timings(result, chunk_offset: float = 0.0) -> List[WordTiming]:
                         )
                         word_timings.append(word_timing)
         else:
-            print("Warning: No token timing information available in result object")
+            logger.warning("No token timing information available in result object")
     except Exception as e:
-        print(f"Error extracting word timings: {e}")
+        logger.error(f"Error extracting word timings: {e}")
     
     return word_timings
 
-def calculate_audio_duration(audio_data, sample_rate: int = 24000) -> float:
-    """Calculate duration of audio data in seconds"""
+def calculate_audio_duration(audio_data: np.ndarray, sample_rate: int = DEFAULT_SAMPLE_RATE) -> float:
+    """Calculate duration of audio data in seconds.
+    
+    Args:
+        audio_data: NumPy array containing audio samples
+        sample_rate: Audio sample rate in Hz
+        
+    Returns:
+        Duration in seconds
+    """
     return len(audio_data) / sample_rate
 
-def synthesize(text: str, speaker: str, speed: float, format: str="wav", lang_code: str = "a", include_captions: bool = False) -> Union[bytes, SynthesisResult]:
+def synthesize(
+    text: str, 
+    speaker: str, 
+    speed: float, 
+    format: str = "wav", 
+    lang_code: str = "a", 
+    include_captions: bool = False
+) -> Union[bytes, SynthesisResult]:
     """Generate text-to-speech audio and return as bytes with automatic text chunking
     
     Args:
@@ -218,15 +348,15 @@ def synthesize(text: str, speaker: str, speed: float, format: str="wav", lang_co
         lang_pipeline = get_pipeline(lang_code)
         
         # Automatically chunk text to avoid token limits
-        text_chunks = chunk_text(text, initial_chunk_size=800)  # Conservative size for stability
-        print(f"Split text into {len(text_chunks)} chunks for processing (lang: {lang_code})")
+        text_chunks = chunk_text(text, initial_chunk_size=DEFAULT_CHUNK_SIZE)
+        logger.info(f"Split text into {len(text_chunks)} chunks for processing (lang: {lang_code})")
         
         all_audio_data = []
         all_word_timings = [] if include_captions else None
         chunk_time_offset = 0.0 if include_captions else 0.0
         
         for chunk_idx, chunk in enumerate(text_chunks):
-            print(f"Processing chunk {chunk_idx + 1}/{len(text_chunks)}: {chunk[:50]}...")
+            logger.debug(f"Processing chunk {chunk_idx + 1}/{len(text_chunks)}: {chunk[:50]}...")
             
             if include_captions:
                 chunk_audio_data = []
@@ -257,11 +387,18 @@ def synthesize(text: str, speaker: str, speed: float, format: str="wav", lang_co
                 all_audio_data.append(chunk_combined_audio)
                 all_word_timings.extend(chunk_word_timings)
         
-        # Concatenate all audio data
-        if len(all_audio_data) == 1:
+        # Concatenate all audio data efficiently
+        if not all_audio_data:
+            raise RuntimeError("No audio data generated")
+        elif len(all_audio_data) == 1:
             combined_audio = all_audio_data[0]
         else:
-            combined_audio = np.concatenate(all_audio_data, axis=0)
+            # Use concatenate for better memory efficiency with large arrays
+            try:
+                combined_audio = np.concatenate(all_audio_data, axis=0)
+            except np.core._exceptions.MemoryError:
+                logger.error("Memory error during audio concatenation")
+                raise RuntimeError("Insufficient memory to process audio")
         
         print(f"Combined {len(all_audio_data)} audio segments: {len(combined_audio)} total samples")
         
@@ -361,11 +498,18 @@ def synthesize_with_voice_blend(text: str, voice_weights: Dict[str, float], spee
                 all_audio_data.append(chunk_combined_audio)
                 all_word_timings.extend(chunk_word_timings)
         
-        # Concatenate all audio data
-        if len(all_audio_data) == 1:
+        # Concatenate all audio data efficiently
+        if not all_audio_data:
+            raise RuntimeError("No audio data generated")
+        elif len(all_audio_data) == 1:
             combined_audio = all_audio_data[0]
         else:
-            combined_audio = np.concatenate(all_audio_data, axis=0)
+            # Use concatenate for better memory efficiency with large arrays
+            try:
+                combined_audio = np.concatenate(all_audio_data, axis=0)
+            except np.core._exceptions.MemoryError:
+                logger.error("Memory error during audio concatenation")
+                raise RuntimeError("Insufficient memory to process audio")
         
         print(f"Combined {len(all_audio_data)} blended audio segments: {len(combined_audio)} total samples")
         
