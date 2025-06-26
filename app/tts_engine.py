@@ -177,11 +177,12 @@ def extract_word_timings(result, chunk_offset: float = 0.0) -> List[WordTiming]:
                 if hasattr(token, 'text') and hasattr(token, 'start_ts') and hasattr(token, 'end_ts'):
                     # Skip empty or whitespace-only tokens
                     if token.text.strip():
+                        phonemes = getattr(token, 'phonemes', '') or getattr(token, 'graphemes', '') or ''
                         word_timing = WordTiming(
                             text=token.text,
                             start_time=token.start_ts + chunk_offset,
                             end_time=token.end_ts + chunk_offset,
-                            phonemes=getattr(token, 'phonemes', '')
+                            phonemes=phonemes
                         )
                         word_timings.append(word_timing)
         else:

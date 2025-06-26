@@ -324,7 +324,7 @@ async def create_speech(request: OpenAISpeechRequest):
                                     "generation_method": "streaming"
                                 }
                             }
-                            yield f"data: {json.dumps(chunk_data)}\n\n"
+                            yield f"data: {json.dumps(chunk_data, ensure_ascii=False)}\n\n"
                     else:
                         # Single voice streaming captions
                         for chunk in synthesize_streaming(
@@ -356,7 +356,7 @@ async def create_speech(request: OpenAISpeechRequest):
                                     "generation_method": "streaming"
                                 }
                             }
-                            yield f"data: {json.dumps(chunk_data)}\n\n"
+                            yield f"data: {json.dumps(chunk_data, ensure_ascii=False)}\n\n"
                 
                 headers = {
                     "Content-Type": "text/event-stream",
