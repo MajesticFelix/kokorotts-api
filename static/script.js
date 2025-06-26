@@ -215,6 +215,7 @@ async function generateSpeech() {
         response_format: format,
         speed: speed,
         stream: streaming,
+        include_captions: false, // temp
         language: language
     };
 

@@ -4,11 +4,30 @@ import numpy as np
 from kokoro import KPipeline
 import soundfile as sf
 from pydub import AudioSegment
-from typing import Dict, Iterator, List, Optional
+from typing import Dict, Iterator, List, NamedTuple, Union
 
 # Global pipeline cache for different languages
 _pipelines: Dict[str, KPipeline] = {}
 _device = "cuda" if torch.cuda.is_available() else "cpu"
+
+# Data structures for timing information
+class WordTiming(NamedTuple):
+    text: str
+    start_time: float
+    end_time: float
+    phonemes: str
+
+class SynthesisResult(NamedTuple):
+    word_timings: List[WordTiming]
+    audio_bytes: bytes
+    total_duration: float
+    sample_rate: int
+
+class StreamingCaptionChunk(NamedTuple):
+    word_timings: List[WordTiming]
+    audio_data: bytes
+    chunk_number: int
+    is_final: bool
 
 def get_pipeline(lang_code: str = "a") -> KPipeline:
     """Get or create a pipeline for the specified language code"""
@@ -148,8 +167,48 @@ def create_wav_streaming_header(sample_rate: int = 24000, channels: int = 1, bit
     
     return bytes(header)
 
-def synthesize(text: str, speaker: str, speed: float, format: str="wav", lang_code: str = "a") -> bytes:
-    """Generate text-to-speech audio and return as bytes with automatic text chunking"""
+def extract_word_timings(result, chunk_offset: float = 0.0) -> List[WordTiming]:
+    """Extract per-word timing information from KokoroTTS result object"""
+    word_timings = []
+    
+    try:
+        if hasattr(result, 'tokens') and result.tokens:
+            for token in result.tokens:
+                if hasattr(token, 'text') and hasattr(token, 'start_ts') and hasattr(token, 'end_ts'):
+                    # Skip empty or whitespace-only tokens
+                    if token.text.strip():
+                        word_timing = WordTiming(
+                            text=token.text,
+                            start_time=token.start_ts + chunk_offset,
+                            end_time=token.end_ts + chunk_offset,
+                            phonemes=getattr(token, 'phonemes', '')
+                        )
+                        word_timings.append(word_timing)
+        else:
+            print("Warning: No token timing information available in result object")
+    except Exception as e:
+        print(f"Error extracting word timings: {e}")
+    
+    return word_timings
+
+def calculate_audio_duration(audio_data, sample_rate: int = 24000) -> float:
+    """Calculate duration of audio data in seconds"""
+    return len(audio_data) / sample_rate
+
+def synthesize(text: str, speaker: str, speed: float, format: str="wav", lang_code: str = "a", include_captions: bool = False) -> Union[bytes, SynthesisResult]:
+    """Generate text-to-speech audio and return as bytes with automatic text chunking
+    
+    Args:
+        text: Input text to synthesize
+        speaker: Voice name to use
+        speed: Speech speed multiplier
+        format: Audio format (wav, mp3, etc.)
+        lang_code: Language code
+        include_captions: If True, returns SynthesisResult with word timings; if False, returns bytes
+    
+    Returns:
+        bytes if include_captions=False, SynthesisResult if include_captions=True
+    """
     if not text.strip():
         raise ValueError("Text cannot be empty")
     
@@ -162,15 +221,40 @@ def synthesize(text: str, speaker: str, speed: float, format: str="wav", lang_co
         print(f"Split text into {len(text_chunks)} chunks for processing (lang: {lang_code})")
         
         all_audio_data = []
+        all_word_timings = [] if include_captions else None
+        chunk_time_offset = 0.0 if include_captions else 0.0
         
         for chunk_idx, chunk in enumerate(text_chunks):
             print(f"Processing chunk {chunk_idx + 1}/{len(text_chunks)}: {chunk[:50]}...")
+            
+            if include_captions:
+                chunk_audio_data = []
+                chunk_word_timings = []
             
             generator = lang_pipeline(chunk, speaker, speed)
             for result in generator:
                 audio = result.audio.cpu().numpy()  # Convert to numpy array
                 print(f"Generated sub-chunk for chunk {chunk_idx + 1}: {len(audio)} samples")
-                all_audio_data.append(audio)
+                
+                if include_captions:
+                    # Extract timing information
+                    sub_chunk_timings = extract_word_timings(result, chunk_time_offset)
+                    chunk_word_timings.extend(sub_chunk_timings)
+                    chunk_audio_data.append(audio)
+                    
+                    # Update time offset for next sub-chunk
+                    chunk_time_offset += calculate_audio_duration(audio)
+                else:
+                    all_audio_data.append(audio)
+            
+            # Handle audio data for captions
+            if include_captions and chunk_audio_data:
+                if len(chunk_audio_data) == 1:
+                    chunk_combined_audio = chunk_audio_data[0]
+                else:
+                    chunk_combined_audio = np.concatenate(chunk_audio_data, axis=0)
+                all_audio_data.append(chunk_combined_audio)
+                all_word_timings.extend(chunk_word_timings)
         
         # Concatenate all audio data
         if len(all_audio_data) == 1:
@@ -179,12 +263,37 @@ def synthesize(text: str, speaker: str, speed: float, format: str="wav", lang_co
             combined_audio = np.concatenate(all_audio_data, axis=0)
         
         print(f"Combined {len(all_audio_data)} audio segments: {len(combined_audio)} total samples")
-        return audio_to_bytes(combined_audio, format)
+        
+        if include_captions:
+            total_duration = calculate_audio_duration(combined_audio)
+            audio_bytes = audio_to_bytes(combined_audio, format)
+            print(f"Generated {len(all_word_timings)} words with timing information")
+            
+            return SynthesisResult(
+                word_timings=all_word_timings,
+                audio_bytes=audio_bytes,
+                total_duration=total_duration,
+                sample_rate=24000
+            )
+        else:
+            return audio_to_bytes(combined_audio, format)
     except Exception as e:
         raise RuntimeError(f"Synthesis failed: {str(e)}")
 
-def synthesize_with_voice_blend(text: str, voice_weights: Dict[str, float], speed: float, format: str = "wav", lang_code: str = "a") -> bytes:
-    """Generate text-to-speech audio with blended voices and return as bytes with automatic text chunking"""
+def synthesize_with_voice_blend(text: str, voice_weights: Dict[str, float], speed: float, format: str = "wav", lang_code: str = "a", include_captions: bool = False) -> Union[bytes, SynthesisResult]:
+    """Generate text-to-speech audio with blended voices and return as bytes with automatic text chunking
+    
+    Args:
+        text: Input text to synthesize
+        voice_weights: Dictionary mapping voice names to blend weights
+        speed: Speech speed multiplier
+        format: Audio format (wav, mp3, etc.)
+        lang_code: Language code
+        include_captions: If True, returns SynthesisResult with word timings; if False, returns bytes
+    
+    Returns:
+        bytes if include_captions=False, SynthesisResult if include_captions=True
+    """
     if not text.strip():
         raise ValueError("Text cannot be empty")
     
@@ -216,15 +325,40 @@ def synthesize_with_voice_blend(text: str, voice_weights: Dict[str, float], spee
         print(f"Voice blend: Split text into {len(text_chunks)} chunks for processing (lang: {lang_code})")
         
         all_audio_data = []
+        all_word_timings = [] if include_captions else None
+        chunk_time_offset = 0.0 if include_captions else 0.0
         
         for chunk_idx, chunk in enumerate(text_chunks):
             print(f"Processing voice blend chunk {chunk_idx + 1}/{len(text_chunks)}: {chunk[:50]}...")
+            
+            if include_captions:
+                chunk_audio_data = []
+                chunk_word_timings = []
             
             generator = lang_pipeline(chunk, voice=blended_voice, speed=speed)
             for result in generator:
                 audio = result.audio.cpu().numpy()  # Convert to numpy array
                 print(f"Generated sub-chunk for blend chunk {chunk_idx + 1}: {len(audio)} samples")
-                all_audio_data.append(audio)
+                
+                if include_captions:
+                    # Extract timing information
+                    sub_chunk_timings = extract_word_timings(result, chunk_time_offset)
+                    chunk_word_timings.extend(sub_chunk_timings)
+                    chunk_audio_data.append(audio)
+                    
+                    # Update time offset for next sub-chunk
+                    chunk_time_offset += calculate_audio_duration(audio)
+                else:
+                    all_audio_data.append(audio)
+            
+            # Handle audio data for captions
+            if include_captions and chunk_audio_data:
+                if len(chunk_audio_data) == 1:
+                    chunk_combined_audio = chunk_audio_data[0]
+                else:
+                    chunk_combined_audio = np.concatenate(chunk_audio_data, axis=0)
+                all_audio_data.append(chunk_combined_audio)
+                all_word_timings.extend(chunk_word_timings)
         
         # Concatenate all audio data
         if len(all_audio_data) == 1:
@@ -233,12 +367,37 @@ def synthesize_with_voice_blend(text: str, voice_weights: Dict[str, float], spee
             combined_audio = np.concatenate(all_audio_data, axis=0)
         
         print(f"Combined {len(all_audio_data)} blended audio segments: {len(combined_audio)} total samples")
-        return audio_to_bytes(combined_audio, format)
+        
+        if include_captions:
+            total_duration = calculate_audio_duration(combined_audio)
+            audio_bytes = audio_to_bytes(combined_audio, format)
+            print(f"Generated {len(all_word_timings)} words with timing information for voice blend")
+            
+            return SynthesisResult(
+                word_timings=all_word_timings,
+                audio_bytes=audio_bytes,
+                total_duration=total_duration,
+                sample_rate=24000
+            )
+        else:
+            return audio_to_bytes(combined_audio, format)
     except Exception as e:
         raise RuntimeError(f"Voice blend synthesis failed: {str(e)}")
 
-def synthesize_streaming(text: str, speaker: str, speed: float, format: str = "wav", lang_code: str = "a") -> Iterator[bytes]:
-    """Generate text-to-speech audio in streaming chunks with automatic text chunking"""
+def synthesize_streaming(text: str, speaker: str, speed: float, format: str = "wav", lang_code: str = "a", include_captions: bool = False) -> Union[Iterator[bytes], Iterator[StreamingCaptionChunk]]:
+    """Generate text-to-speech audio in streaming chunks with automatic text chunking
+    
+    Args:
+        text: Input text to synthesize
+        speaker: Voice name to use
+        speed: Speech speed multiplier
+        format: Audio format (wav, mp3, etc.)
+        lang_code: Language code
+        include_captions: If True, returns Iterator[StreamingCaptionChunk] with word timings; if False, returns Iterator[bytes]
+    
+    Returns:
+        Iterator[bytes] if include_captions=False, Iterator[StreamingCaptionChunk] if include_captions=True
+    """
     if not text.strip():
         raise ValueError("Text cannot be empty")
     
@@ -251,6 +410,7 @@ def synthesize_streaming(text: str, speaker: str, speed: float, format: str = "w
         print(f"Streaming: Split text into {len(text_chunks)} chunks for processing (lang: {lang_code})")
         
         chunk_counter = 0
+        chunk_time_offset = 0.0 if include_captions else 0.0
         
         for chunk_idx, chunk in enumerate(text_chunks):
             print(f"Streaming chunk {chunk_idx + 1}/{len(text_chunks)}: {chunk[:50]}...")
@@ -261,22 +421,69 @@ def synthesize_streaming(text: str, speaker: str, speed: float, format: str = "w
                 audio = result.audio.cpu().numpy()  # Convert to numpy array
                 print(f"Streaming sub-chunk {chunk_counter}: {result.graphemes} -> {len(audio)} samples")
                 
-                if format.lower() == "wav":
-                    if chunk_counter == 1:
-                        # Send dummy WAV header first, then raw audio data
-                        yield create_wav_streaming_header()
-                        yield audio_to_raw_bytes(audio)
+                if include_captions:
+                    # Extract timing information for this sub-chunk
+                    sub_chunk_timings = extract_word_timings(result, chunk_time_offset)
+                    
+                    # Convert audio to bytes
+                    if format.lower() == "wav":
+                        if chunk_counter == 1:
+                            # Send WAV header first, then raw audio data
+                            yield StreamingCaptionChunk(
+                                word_timings=[],
+                                audio_data=create_wav_streaming_header(),
+                                chunk_number=chunk_counter,
+                                is_final=False
+                            )
+                            chunk_counter += 1
+                            
+                        audio_bytes = audio_to_raw_bytes(audio)
                     else:
-                        # All subsequent chunks are raw audio data
-                        yield audio_to_raw_bytes(audio)
+                        # For non-WAV formats, each chunk needs complete file headers
+                        audio_bytes = audio_to_bytes(audio, format)
+                    
+                    # Update time offset for next sub-chunk
+                    chunk_time_offset += calculate_audio_duration(audio)
+                    
+                    # Determine if this is the final chunk (approximate)
+                    is_final = chunk_idx == len(text_chunks) - 1
+                    
+                    yield StreamingCaptionChunk(
+                        word_timings=sub_chunk_timings,
+                        audio_data=audio_bytes,
+                        chunk_number=chunk_counter,
+                        is_final=is_final
+                    )
                 else:
-                    # For non-WAV formats, each chunk needs complete file headers
-                    yield audio_to_bytes(audio, format)
+                    # Original non-caption logic
+                    if format.lower() == "wav":
+                        if chunk_counter == 1:
+                            # Send dummy WAV header first, then raw audio data
+                            yield create_wav_streaming_header()
+                            yield audio_to_raw_bytes(audio)
+                        else:
+                            # All subsequent chunks are raw audio data
+                            yield audio_to_raw_bytes(audio)
+                    else:
+                        # For non-WAV formats, each chunk needs complete file headers
+                        yield audio_to_bytes(audio, format)
     except Exception as e:
         raise RuntimeError(f"Streaming synthesis failed: {str(e)}")
 
-def synthesize_streaming_with_voice_blend(text: str, voice_weights: Dict[str, float], speed: float, format: str = "wav", lang_code: str = "a") -> Iterator[bytes]:
-    """Generate text-to-speech audio with blended voices in streaming chunks with automatic text chunking"""
+def synthesize_streaming_with_voice_blend(text: str, voice_weights: Dict[str, float], speed: float, format: str = "wav", lang_code: str = "a", include_captions: bool = False) -> Union[Iterator[bytes], Iterator[StreamingCaptionChunk]]:
+    """Generate text-to-speech audio with blended voices in streaming chunks with automatic text chunking
+    
+    Args:
+        text: Input text to synthesize
+        voice_weights: Dictionary mapping voice names to blend weights
+        speed: Speech speed multiplier
+        format: Audio format (wav, mp3, etc.)
+        lang_code: Language code
+        include_captions: If True, returns Iterator[StreamingCaptionChunk] with word timings; if False, returns Iterator[bytes]
+    
+    Returns:
+        Iterator[bytes] if include_captions=False, Iterator[StreamingCaptionChunk] if include_captions=True
+    """
     if not text.strip():
         raise ValueError("Text cannot be empty")
     
@@ -308,6 +515,7 @@ def synthesize_streaming_with_voice_blend(text: str, voice_weights: Dict[str, fl
         print(f"Streaming voice blend: Split text into {len(text_chunks)} chunks for processing (lang: {lang_code})")
         
         chunk_counter = 0
+        chunk_time_offset = 0.0 if include_captions else 0.0
         
         for chunk_idx, chunk in enumerate(text_chunks):
             print(f"Streaming voice blend chunk {chunk_idx + 1}/{len(text_chunks)}: {chunk[:50]}...")
@@ -318,17 +526,51 @@ def synthesize_streaming_with_voice_blend(text: str, voice_weights: Dict[str, fl
                 audio = result.audio.cpu().numpy()  # Convert to numpy array
                 print(f"Streaming blended sub-chunk {chunk_counter}: {result.graphemes} -> {len(audio)} samples")
                 
-                if format.lower() == "wav":
-                    if chunk_counter == 1:
-                        # Send dummy WAV header first, then raw audio data
-                        yield create_wav_streaming_header()
-                        yield audio_to_raw_bytes(audio)
+                if include_captions:
+                    # Extract timing information for this sub-chunk
+                    sub_chunk_timings = extract_word_timings(result, chunk_time_offset)
+                    
+                    # Convert audio to bytes
+                    if format.lower() == "wav":
+                        if chunk_counter == 1:
+                            # Send WAV header first, then raw audio data
+                            yield StreamingCaptionChunk(
+                                word_timings=[],
+                                audio_data=create_wav_streaming_header(),
+                                chunk_number=chunk_counter,
+                                is_final=False
+                            )
+                            chunk_counter += 1
+                            
+                        audio_bytes = audio_to_raw_bytes(audio)
                     else:
-                        # All subsequent chunks are raw audio data
-                        yield audio_to_raw_bytes(audio)
+                        # For non-WAV formats, each chunk needs complete file headers
+                        audio_bytes = audio_to_bytes(audio, format)
+                    
+                    # Update time offset for next sub-chunk
+                    chunk_time_offset += calculate_audio_duration(audio)
+                    
+                    # Determine if this is the final chunk (approximate)
+                    is_final = chunk_idx == len(text_chunks) - 1
+                    
+                    yield StreamingCaptionChunk(
+                        word_timings=sub_chunk_timings,
+                        audio_data=audio_bytes,
+                        chunk_number=chunk_counter,
+                        is_final=is_final
+                    )
                 else:
-                    # For non-WAV formats, each chunk needs complete file headers
-                    yield audio_to_bytes(audio, format)
+                    # Original non-caption logic
+                    if format.lower() == "wav":
+                        if chunk_counter == 1:
+                            # Send dummy WAV header first, then raw audio data
+                            yield create_wav_streaming_header()
+                            yield audio_to_raw_bytes(audio)
+                        else:
+                            # All subsequent chunks are raw audio data
+                            yield audio_to_raw_bytes(audio)
+                    else:
+                        # For non-WAV formats, each chunk needs complete file headers
+                        yield audio_to_bytes(audio, format)
     except Exception as e:
         raise RuntimeError(f"Voice blend streaming synthesis failed: {str(e)}")
-
