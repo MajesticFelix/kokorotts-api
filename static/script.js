@@ -1,5 +1,9 @@
 let currentAudioUrl = null;
 let voiceRowCounter = 2;
+let currentAbortController = null;
+let isGenerating = false;
+let currentAudioFormat = 'mp3';
+let currentFileName = null;
 
 // Initialize page
 window.onload = function() {
@@ -187,6 +191,48 @@ function buildVoiceSpec() {
     }
 }
 
+// Download audio
+function downloadAudio() {
+    if (!currentAudioUrl) {
+        showStatus('❌ No audio available for download', 'error', 'mainStatus');
+        return;
+    }
+    
+    const link = document.createElement('a');
+    link.href = currentAudioUrl;
+    link.download = currentFileName || `kokoro-tts-audio.${currentAudioFormat}`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    showStatus('📥 Audio download started', 'success', 'mainStatus');
+}
+
+// Cancel generation
+function cancelGeneration() {
+    if (currentAbortController) {
+        currentAbortController.abort();
+        currentAbortController = null;
+    }
+    
+    isGenerating = false;
+    const generateBtn = document.getElementById('generateBtn');
+    const cancelBtn = document.getElementById('cancelBtn');
+    const downloadBtn = document.getElementById('downloadBtn');
+    
+    generateBtn.disabled = false;
+    generateBtn.textContent = '🎤 Generate Speech';
+    cancelBtn.style.display = 'none';
+    downloadBtn.style.display = 'none';
+    
+    showStatus('❌ Generation cancelled by user', 'error', 'mainStatus');
+    
+    // Stop any audio playback
+    const audioPlayer = document.getElementById('audioPlayer');
+    audioPlayer.pause();
+    audioPlayer.currentTime = 0;
+}
+
 // Main speech generation
 async function generateSpeech() {
     const text = document.getElementById('textInput').value.trim();
@@ -201,9 +247,27 @@ async function generateSpeech() {
         return;
     }
 
+    if (isGenerating) {
+        showStatus('❌ Generation already in progress', 'error', 'mainStatus');
+        return;
+    }
+
+    isGenerating = true;
+    currentAbortController = new AbortController();
+    
     const generateBtn = document.getElementById('generateBtn');
+    const cancelBtn = document.getElementById('cancelBtn');
+    const downloadBtn = document.getElementById('downloadBtn');
+    
     generateBtn.disabled = true;
     generateBtn.textContent = streaming ? '🔄 Streaming...' : '⏳ Generating...';
+    cancelBtn.style.display = 'inline-block';
+    downloadBtn.style.display = 'none';
+
+    // Store current format and generate filename
+    currentAudioFormat = format;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+    currentFileName = `kokoro-${voiceSpec}-${timestamp}.${format}`;
 
     // Reset audio player
     resetAudioPlayer();
@@ -228,10 +292,17 @@ async function generateSpeech() {
             await handleStandardGeneration(payload);
         }
     } catch (error) {
-        showStatus(`❌ Generation failed: ${error.message}`, 'error', 'mainStatus');
+        if (error.name === 'AbortError') {
+            showStatus('❌ Generation cancelled', 'error', 'mainStatus');
+        } else {
+            showStatus(`❌ Generation failed: ${error.message}`, 'error', 'mainStatus');
+        }
     } finally {
+        isGenerating = false;
+        currentAbortController = null;
         generateBtn.disabled = false;
         generateBtn.textContent = '🎤 Generate Speech';
+        cancelBtn.style.display = 'none';
     }
 }
 
@@ -265,7 +336,8 @@ async function handleStandardGeneration(payload) {
     const response = await fetch('/v1/audio/speech', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        signal: currentAbortController.signal
     });
 
     if (!response.ok) {
@@ -320,6 +392,11 @@ async function handleStandardGeneration(payload) {
 
     showStatus(`✅ Audio generated in ${totalTime.toFixed(2)}s (${formatBytes(blob.size)})`, 'success', 'mainStatus');
 
+    // Show download button
+    const downloadBtn = document.getElementById('downloadBtn');
+    downloadBtn.style.display = 'inline-block';
+    addDebugLog(`📥 Download button enabled`);
+
     // Auto-play
     try {
         await audioPlayer.play();
@@ -357,7 +434,8 @@ async function handleStreamingGeneration(payload) {
     const response = await fetch('/v1/audio/speech', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        signal: currentAbortController.signal
     });
 
     if (!response.ok) {
@@ -419,6 +497,12 @@ async function handleStreamingGeneration(payload) {
             });
 
             showStatus(`✅ Streaming completed in ${totalTime.toFixed(2)}s (${chunkCount} chunks, ${formatBytes(totalSize)})`, 'success', 'mainStatus');
+            
+            // Show download button
+            const downloadBtn = document.getElementById('downloadBtn');
+            downloadBtn.style.display = 'inline-block';
+            addDebugLog(`📥 Download button enabled`);
+            
             break;
         }
 
@@ -501,9 +585,10 @@ function resetAudioPlayer() {
     audioPlayer.src = '';
     audioPlayer.style.display = 'none';
     
-    // Hide debug and stats
+    // Hide debug, stats, and download button
     document.getElementById('streamingDebug').style.display = 'none';
     document.getElementById('performanceStats').style.display = 'none';
+    document.getElementById('downloadBtn').style.display = 'none';
 }
 
 function updatePerformanceStats(stats) {

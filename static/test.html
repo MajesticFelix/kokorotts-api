@@ -199,7 +199,11 @@
                     <button type="button" class="btn btn-success" onclick="addVoiceRow()" style="margin-top: 10px;">+ Add Voice</button>
                 </div>
 
-                <button class="btn btn-primary" onclick="generateSpeech()" id="generateBtn">🎤 Generate Speech</button>
+                <div class="generation-controls">
+                    <button class="btn btn-primary" onclick="generateSpeech()" id="generateBtn">🎤 Generate Speech</button>
+                    <button class="btn btn-danger" onclick="cancelGeneration()" id="cancelBtn" style="display: none;">❌ Cancel</button>
+                    <button class="btn btn-success" onclick="downloadAudio()" id="downloadBtn" style="display: none;">📥 Download Audio</button>
+                </div>
 
                 <div id="mainStatus"></div>
 
