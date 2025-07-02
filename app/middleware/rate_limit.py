@@ -476,6 +476,9 @@ def setup_rate_limiting(app):
     limiter = create_rate_limiter()
     
     if limiter:
+        # Set the limiter on app state for slowapi middleware
+        app.state.limiter = limiter
+        
         # Add slowapi middleware for basic rate limiting
         app.add_middleware(SlowAPIMiddleware)
         

@@ -4,6 +4,7 @@ import logging
 import time
 from typing import Callable, Optional
 from fastapi import Request, Response
+from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from ..config import (
@@ -63,7 +64,7 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         
         try:
             # Extract API key from request
-            api_key = await get_api_key_from_request(request, None)
+            api_key = await self._extract_api_key_from_request(request)
             
             if api_key:
                 # Verify API key in database
@@ -91,6 +92,30 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
                     
                     # Store invalid key attempt info for rate limiting
                     request.state.authentication_failed = True
+                    
+                    # If authentication is required, block invalid keys
+                    if self.config.api_key.is_required():
+                        return JSONResponse(
+                            status_code=401,
+                            content={
+                                "error": {
+                                    "message": "Invalid API key",
+                                    "type": "authentication_error"
+                                }
+                            }
+                        )
+            else:
+                # No API key provided
+                if self.config.api_key.is_required():
+                    return JSONResponse(
+                        status_code=401,
+                        content={
+                            "error": {
+                                "message": "API key required",
+                                "type": "authentication_error"
+                            }
+                        }
+                    )
             
             # Continue to next middleware/endpoint
             response = await call_next(request)
@@ -115,6 +140,33 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
             # Log request processing time
             process_time = time.time() - start_time
             logger.debug(f"API key auth middleware processed request in {process_time:.3f}s")
+    
+    async def _extract_api_key_from_request(self, request: Request) -> Optional[str]:
+        """Extract API key from request headers (middleware version).
+        
+        This is similar to get_api_key_from_request but designed for middleware use.
+        """
+        from ..utils.api_key_generator import APIKeyGenerator
+        
+        # Check Bearer token
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header.replace("Bearer ", "").strip()
+            if APIKeyGenerator.validate_api_key_format(token):
+                return token
+        
+        # Check Authorization header with ApiKey format
+        if auth_header.startswith("ApiKey "):
+            token = auth_header.replace("ApiKey ", "").strip()
+            if APIKeyGenerator.validate_api_key_format(token):
+                return token
+        
+        # Check X-API-Key header
+        api_key_header = request.headers.get("X-API-Key", "")
+        if api_key_header and APIKeyGenerator.validate_api_key_format(api_key_header):
+            return api_key_header
+        
+        return None
     
     def _should_skip_auth(self, path: str) -> bool:
         """Check if authentication should be skipped for this path."""

@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Union
 
 import psutil
 import torch
-from fastapi import FastAPI, HTTPException, APIRouter
+from fastapi import FastAPI, HTTPException, APIRouter, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -575,14 +575,6 @@ async def create_speech(request: OpenAISpeechRequest):
     - Word-level timing captions
     - Multiple audio formats
     
-    Rate Limits (when enabled):
-    - 30 requests/minute per IP
-    - 200 requests/hour per IP  
-    - 1000 requests/day per IP
-    - 5000 characters/request maximum
-    - 50000 characters/hour per IP
-    - 3 concurrent requests per IP
-    
     Args:
         request: Speech synthesis request parameters
         
@@ -762,7 +754,7 @@ async def create_speech(request: OpenAISpeechRequest):
 
 @openai_router.get("/audio/voices", response_model=OpenAIVoiceResponse, tags=["Audio"])
 @apply_light_rate_limiting_decorator
-async def list_voices():
+async def list_voices(request: Request):
     """OpenAI compatible voice listing endpoint"""
     try:
         voices = get_supported_voices()
@@ -775,7 +767,7 @@ async def list_voices():
 
 @openai_router.get("/audio/languages", response_model=OpenAILanguageResponse, tags=["Audio"])
 @apply_light_rate_limiting_decorator  
-async def list_languages():
+async def list_languages(request: Request):
     """OpenAI compatible language listing endpoint"""
     try:
         languages = get_supported_languages()
