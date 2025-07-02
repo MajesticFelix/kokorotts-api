@@ -23,12 +23,16 @@ logger = logging.getLogger(__name__)
 _pipelines: Dict[str, KPipeline] = {}
 _device = "cuda" if torch.cuda.is_available() else "cpu"
 
-# Configuration Constants
-DEFAULT_SAMPLE_RATE = 24000
-DEFAULT_CHUNK_SIZE = 800
-MAX_CHUNK_SIZE = 1000
-STREAMING_CHUNK_SIZE = 800
-AUDIO_SAMPLE_RATE = 24000
+# Configuration will be loaded lazily when needed
+_config = None
+
+def _get_config():
+    """Get configuration instance, loading it lazily if needed."""
+    global _config
+    if _config is None:
+        from .config import get_config
+        _config = get_config()
+    return _config
 
 # Audio format configurations
 AUDIO_FORMAT_CONFIG = {
@@ -107,7 +111,7 @@ def get_pipeline(lang_code: str = "a") -> KPipeline:
 # Initialize default pipeline for backward compatibility
 pipeline = get_pipeline("a")
 
-def text_segmentation(text: str, chunk_size: int = DEFAULT_CHUNK_SIZE) -> List[str]:
+def text_segmentation(text: str, chunk_size: int = None) -> List[str]:
     """Intelligently segment text for optimal TTS processing.
     
     Uses sentence boundaries, paragraph breaks, and semantic markers
@@ -115,7 +119,7 @@ def text_segmentation(text: str, chunk_size: int = DEFAULT_CHUNK_SIZE) -> List[s
     
     Args:
         text: Input text to segment
-        chunk_size: Target size for each chunk
+        chunk_size: Target size for each chunk (defaults to config value)
         
     Returns:
         List of text segments optimized for TTS
@@ -123,6 +127,9 @@ def text_segmentation(text: str, chunk_size: int = DEFAULT_CHUNK_SIZE) -> List[s
     Raises:
         ValueError: If text is empty
     """
+    if chunk_size is None:
+        chunk_size = _get_config().tts.chunk_size
+        
     if not text or not text.strip():
         logger.warning("Empty text provided to text_segmentation")
         return []
@@ -256,8 +263,10 @@ def _split_long_sentence(sentence: str, max_size: int) -> List[str]:
     return [p.strip() for p in final_parts if p.strip()]
 
 # Backward compatibility
-def chunk_text(text: str, initial_chunk_size: int = MAX_CHUNK_SIZE) -> List[str]:
+def chunk_text(text: str, initial_chunk_size: int = None) -> List[str]:
     """Legacy function for backward compatibility."""
+    if initial_chunk_size is None:
+        initial_chunk_size = _get_config().tts.max_chunk_size
     return text_segmentation(text, initial_chunk_size)
 
     
@@ -279,13 +288,13 @@ def audio_to_bytes(audio_data: np.ndarray, target_format: str) -> bytes:
     try:
         if target_format_lower in AUDIO_FORMAT_CONFIG["soundfile_formats"]:
             buffer = io.BytesIO()
-            sf.write(buffer, audio_data, DEFAULT_SAMPLE_RATE, format=target_format.upper())
+            sf.write(buffer, audio_data, _get_config().tts.sample_rate, format=target_format.upper())
             buffer.seek(0)
             return buffer.getvalue()
         elif target_format_lower in AUDIO_FORMAT_CONFIG["pydub_formats"]:
             # Convert WAV to the target format
             wav_buffer = io.BytesIO()
-            sf.write(wav_buffer, audio_data, DEFAULT_SAMPLE_RATE, format="WAV")
+            sf.write(wav_buffer, audio_data, _get_config().tts.sample_rate, format="WAV")
             wav_buffer.seek(0)
 
             audio = AudioSegment.from_wav(wav_buffer)
@@ -323,20 +332,23 @@ def audio_to_raw_bytes(audio_data: np.ndarray) -> bytes:
         raise ValueError(f"Raw audio conversion failed: {e}") from e
 
 def create_wav_streaming_header(
-    sample_rate: int = DEFAULT_SAMPLE_RATE, 
+    sample_rate: int = None, 
     channels: int = 1, 
     bits_per_sample: int = 16
 ) -> bytes:
     """Create a WAV header with large placeholder data size for streaming.
     
     Args:
-        sample_rate: Audio sample rate in Hz
+        sample_rate: Audio sample rate in Hz (defaults to config value)
         channels: Number of audio channels
         bits_per_sample: Bits per audio sample
         
     Returns:
         WAV header bytes
     """
+    if sample_rate is None:
+        sample_rate = _get_config().tts.sample_rate
+        
     # WAV header structure with dummy large data size for streaming
     header = bytearray()
     
@@ -394,28 +406,33 @@ def extract_word_timings(result, chunk_offset: float = 0.0) -> List[WordTiming]:
     
     return word_timings
 
-def calculate_audio_duration(audio_data: np.ndarray, sample_rate: int = DEFAULT_SAMPLE_RATE) -> float:
+def calculate_audio_duration(audio_data: np.ndarray, sample_rate: int = None) -> float:
     """Calculate duration of audio data in seconds.
     
     Args:
         audio_data: NumPy array containing audio samples
-        sample_rate: Audio sample rate in Hz
+        sample_rate: Audio sample rate in Hz (defaults to config value)
         
     Returns:
         Duration in seconds
     """
+    if sample_rate is None:
+        sample_rate = _get_config().tts.sample_rate
     return len(audio_data) / sample_rate
 
-def should_use_batch_processing(text: str, memory_limit_mb: float = 1024) -> bool:
+def should_use_batch_processing(text: str, memory_limit_mb: float = None) -> bool:
     """Determine if text should be processed in batches.
     
     Args:
         text: Input text to analyze
-        memory_limit_mb: Memory limit in MB
+        memory_limit_mb: Memory limit in MB (defaults to config value)
         
     Returns:
         True if batch processing is recommended
     """
+    if memory_limit_mb is None:
+        memory_limit_mb = _get_config().tts.memory_limit_mb
+        
     # Simple heuristic: if text is very long, use batch processing
     text_length = len(text)
     # Rough estimate: ~2.5MB per 1000 characters with captions
@@ -557,7 +574,7 @@ def _batch_synthesize(
             word_timings=all_word_timings,
             audio_bytes=final_audio_bytes,
             total_duration=total_duration,
-            sample_rate=AUDIO_SAMPLE_RATE
+            sample_rate=_get_config().tts.sample_rate
         )
     else:
         # For audio-only, concatenate the byte segments
@@ -692,7 +709,7 @@ def _core_synthesize(
     format: str = "wav",
     lang_code: str = "a",
     include_captions: bool = False,
-    chunk_size: int = DEFAULT_CHUNK_SIZE
+    chunk_size: int = None
 ) -> Union[bytes, SynthesisResult]:
     """Core synthesis engine that handles both single and blended voices.
     
@@ -703,7 +720,7 @@ def _core_synthesize(
         format: Audio format (wav, mp3, etc.)
         lang_code: Language code
         include_captions: If True, returns SynthesisResult with word timings
-        chunk_size: Size for text chunking
+        chunk_size: Size for text chunking (defaults to config value)
         
     Returns:
         bytes if include_captions=False, SynthesisResult if include_captions=True
@@ -712,6 +729,9 @@ def _core_synthesize(
         ValueError: For input validation errors
         RuntimeError: For synthesis failures
     """
+    if chunk_size is None:
+        chunk_size = _get_config().tts.chunk_size
+        
     if not text.strip():
         raise ValueError("Text cannot be empty")
     
@@ -797,7 +817,7 @@ def _core_synthesize(
                 word_timings=all_word_timings,
                 audio_bytes=audio_bytes,
                 total_duration=total_duration,
-                sample_rate=AUDIO_SAMPLE_RATE
+                sample_rate=_get_config().tts.sample_rate
             )
         else:
             return audio_to_bytes(combined_audio, format)
@@ -843,7 +863,7 @@ def synthesize_with_voice_blend(text: str, voice_weights: Dict[str, float], spee
     Returns:
         bytes if include_captions=False, SynthesisResult if include_captions=True
     """
-    return _core_synthesize(text, voice_weights, speed, format, lang_code, include_captions, STREAMING_CHUNK_SIZE)
+    return _core_synthesize(text, voice_weights, speed, format, lang_code, include_captions, _get_config().tts.streaming_chunk_size)
 
 def _core_streaming_synthesize(
     text: str,
@@ -881,8 +901,7 @@ def _core_streaming_synthesize(
         prepared_voice = _prepare_voice_for_synthesis(voice_spec, lang_pipeline)
         
         # Use intelligent text segmentation optimized for streaming
-        streaming_chunk_size = 600  # Smaller chunks for streaming
-        text_chunks = text_segmentation(text, streaming_chunk_size)
+        text_chunks = text_segmentation(text, _get_config().tts.streaming_chunk_size)
         voice_type = "blended" if isinstance(voice_spec, dict) else "single"
         
         total_chars = len(text)

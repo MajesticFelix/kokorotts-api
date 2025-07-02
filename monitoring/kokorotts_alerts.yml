@@ -1,0 +1,148 @@
+# Prometheus alerting rules for KokoroTTS API
+
+groups:
+  - name: kokorotts.rate_limiting
+    rules:
+      # High rate limit violation rate
+      - alert: HighRateLimitViolations
+        expr: (rate(kokorotts_requests_blocked_total[5m]) / rate(kokorotts_requests_total[5m])) * 100 > 25
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High rate limit violation rate detected"
+          description: "Rate limit violations are {{ $value }}% of total requests over the last 5 minutes"
+
+      # Very high rate limit violation rate
+      - alert: CriticalRateLimitViolations
+        expr: (rate(kokorotts_requests_blocked_total[5m]) / rate(kokorotts_requests_total[5m])) * 100 > 50
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical rate limit violation rate detected"
+          description: "Rate limit violations are {{ $value }}% of total requests - possible DDoS attack"
+
+      # Redis connection lost
+      - alert: RedisConnectionLost
+        expr: kokorotts_redis_connected == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis connection lost"
+          description: "KokoroTTS API has lost connection to Redis, rate limiting may be impaired"
+
+      # High concurrent connections
+      - alert: HighConcurrentConnections
+        expr: kokorotts_concurrent_requests > kokorotts_max_concurrent_limit * 0.8
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High concurrent connection usage"
+          description: "Concurrent connections ({{ $value }}) are approaching the limit"
+
+      # Character usage spike
+      - alert: CharacterUsageSpike
+        expr: rate(kokorotts_characters_processed_total[1m]) > kokorotts_character_limit_per_hour / 30
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Character usage spike detected"
+          description: "Character processing rate is unusually high: {{ $value }} chars/min"
+
+      # API response time high
+      - alert: HighAPIResponseTime
+        expr: histogram_quantile(0.95, rate(kokorotts_request_duration_seconds_bucket[5m])) > 10
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High API response time"
+          description: "95th percentile response time is {{ $value }}s"
+
+      # Low success rate
+      - alert: LowAPISuccessRate
+        expr: (rate(kokorotts_requests_total{status!~"2.."}[5m]) / rate(kokorotts_requests_total[5m])) * 100 > 10
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low API success rate"
+          description: "Error rate is {{ $value }}% over the last 5 minutes"
+
+  - name: kokorotts.system
+    rules:
+      # High CPU usage
+      - alert: HighCPUUsage
+        expr: kokorotts_cpu_percent > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage on KokoroTTS API"
+          description: "CPU usage is {{ $value }}%"
+
+      # High memory usage
+      - alert: HighMemoryUsage
+        expr: kokorotts_memory_percent > 85
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage on KokoroTTS API"
+          description: "Memory usage is {{ $value }}%"
+
+      # GPU memory usage (if available)
+      - alert: HighGPUMemoryUsage
+        expr: (kokorotts_gpu_memory_used_mb / kokorotts_gpu_memory_total_mb) * 100 > 90
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High GPU memory usage"
+          description: "GPU memory usage is {{ $value }}%"
+
+      # Service down
+      - alert: KokoroTTSServiceDown
+        expr: up{job="kokorotts-api"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "KokoroTTS API service is down"
+          description: "The KokoroTTS API service has been down for more than 30 seconds"
+
+  - name: kokorotts.abuse_detection
+    rules:
+      # Potential DDoS attack
+      - alert: PotentialDDoSAttack
+        expr: rate(kokorotts_requests_total[1m]) > 1000
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Potential DDoS attack detected"
+          description: "Request rate is {{ $value }} requests/minute, which may indicate an attack"
+
+      # Single IP making too many requests
+      - alert: SingleIPHighRequestRate
+        expr: rate(kokorotts_requests_total[1m]) by (ip) > 100
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Single IP making excessive requests"
+          description: "IP {{ $labels.ip }} is making {{ $value }} requests/minute"
+
+      # Abuse pattern detected
+      - alert: AbusePatternDetected
+        expr: kokorotts_abuse_patterns_detected > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Abuse pattern detected"
+          description: "{{ $value }} abuse patterns have been detected by the monitoring system"

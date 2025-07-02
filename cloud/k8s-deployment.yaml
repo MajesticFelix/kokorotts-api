@@ -1,0 +1,212 @@
+# Kubernetes Deployment for KokoroTTS API
+# Production-ready with rate limiting and Redis
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kokorotts
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kokorotts-config
+  namespace: kokorotts
+data:
+  RATE_LIMITING_ENABLED: "true"
+  DEPLOYMENT_MODE: "cloud"
+  DEBUG: "false"
+  LOG_LEVEL: "INFO"
+  HOST: "0.0.0.0"
+  PORT: "8000"
+  CORS_ORIGINS: "https://yourdomain.com,https://api.yourdomain.com"
+  TRUST_PROXY_HEADERS: "true"
+  RATE_LIMIT_REQUESTS_PER_MINUTE: "30"
+  RATE_LIMIT_REQUESTS_PER_HOUR: "200"
+  RATE_LIMIT_REQUESTS_PER_DAY: "1000"
+  RATE_LIMIT_MAX_CHARS_PER_REQUEST: "5000"
+  RATE_LIMIT_CHARS_PER_HOUR: "50000"
+  RATE_LIMIT_CHARS_PER_DAY: "200000"
+  RATE_LIMIT_MAX_CONCURRENT: "3"
+  RATE_LIMIT_USE_REDIS: "true"
+  REDIS_URL: "redis://redis:6379/0"
+  MAX_TEXT_LENGTH: "50000"
+  DEFAULT_LANGUAGE: "a"
+  VOICE_CACHE_DURATION: "3600"
+  MAX_WORKERS: "4"
+  REQUEST_TIMEOUT: "300"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: kokorotts
+spec:
+  selector:
+    app: redis
+  ports:
+    - port: 6379
+      targetPort: 6379
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: kokorotts
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 5
+          periodSeconds: 5
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kokorotts-api
+  namespace: kokorotts
+spec:
+  selector:
+    app: kokorotts-api
+  ports:
+    - port: 80
+      targetPort: 8000
+  type: LoadBalancer
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kokorotts-api
+  namespace: kokorotts
+spec:
+  replicas: 3  # Multiple replicas for high availability
+  selector:
+    matchLabels:
+      app: kokorotts-api
+  template:
+    metadata:
+      labels:
+        app: kokorotts-api
+    spec:
+      containers:
+      - name: kokorotts-api
+        image: kokorotts-api:latest  # Replace with your image
+        ports:
+        - containerPort: 8000
+        envFrom:
+        - configMapRef:
+            name: kokorotts-config
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+---
+# Horizontal Pod Autoscaler
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: kokorotts-api-hpa
+  namespace: kokorotts
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: kokorotts-api
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+
+---
+# Ingress for external access
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kokorotts-ingress
+  namespace: kokorotts
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/rate-limit: "100"  # Additional nginx rate limiting
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+spec:
+  tls:
+  - hosts:
+    - api.yourdomain.com
+    secretName: kokorotts-tls
+  rules:
+  - host: api.yourdomain.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: kokorotts-api
+            port:
+              number: 80

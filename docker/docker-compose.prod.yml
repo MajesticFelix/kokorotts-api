@@ -1,0 +1,133 @@
+# Docker Compose for KokoroTTS API Production/Cloud Deployment
+# Rate limiting enabled with Redis
+
+version: '3.8'
+
+services:
+  kokoro-api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      # Production configuration with rate limiting
+      - RATE_LIMITING_ENABLED=true
+      - DEPLOYMENT_MODE=cloud
+      - DEBUG=false
+      - LOG_LEVEL=INFO
+      - HOST=0.0.0.0
+      - PORT=8000
+      
+      # Security settings
+      - CORS_ORIGINS=https://yourdomain.com,https://api.yourdomain.com
+      - TRUST_PROXY_HEADERS=true
+      
+      # Rate limiting configuration
+      - RATE_LIMIT_REQUESTS_PER_MINUTE=30
+      - RATE_LIMIT_REQUESTS_PER_HOUR=200
+      - RATE_LIMIT_REQUESTS_PER_DAY=1000
+      - RATE_LIMIT_MAX_CHARS_PER_REQUEST=5000
+      - RATE_LIMIT_CHARS_PER_HOUR=50000
+      - RATE_LIMIT_CHARS_PER_DAY=200000
+      - RATE_LIMIT_MAX_CONCURRENT=3
+      
+      # Redis configuration
+      - RATE_LIMIT_USE_REDIS=true
+      - REDIS_URL=redis://redis:6379/0
+      
+      # TTS Configuration
+      - MAX_TEXT_LENGTH=50000
+      - DEFAULT_LANGUAGE=a
+      - VOICE_CACHE_DURATION=3600
+      
+      # Performance settings
+      - MAX_WORKERS=4
+      - REQUEST_TIMEOUT=300
+    depends_on:
+      - redis
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '1.0'
+          memory: 2G
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    restart: always
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: kokorotts
+      POSTGRES_USER: kokoro
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_this_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kokoro -d kokorotts"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # Optional: Nginx reverse proxy with additional rate limiting
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro  # SSL certificates
+    depends_on:
+      - kokoro-api
+    restart: always
+    profiles:
+      - proxy
+
+volumes:
+  model_cache:
+    driver: local
+  redis_data:
+    driver: local
+  postgres_data:
+    driver: local
+
+# Usage:
+# docker-compose -f docker-compose.prod.yml up -d
+# With nginx proxy: docker-compose -f docker-compose.prod.yml --profile proxy up -d
+#
+# Environment variables for production:
+# - Set POSTGRES_PASSWORD for database security
+# - Configure API_KEY_DATABASE_URL=postgresql://kokoro:password@postgres:5432/kokorotts

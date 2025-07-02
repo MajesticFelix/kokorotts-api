@@ -1,0 +1,101 @@
+# Docker Compose for KokoroTTS API Local Development
+# No rate limiting by default - perfect for developers
+
+version: '3.8'
+
+services:
+  kokoro-api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      # Development configuration - no rate limiting
+      - RATE_LIMITING_ENABLED=false
+      - DEPLOYMENT_MODE=local
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+      - HOST=0.0.0.0
+      - PORT=8000
+      - CORS_ORIGINS=*
+      - TRUST_PROXY_HEADERS=true
+      
+      # TTS Configuration
+      - MAX_TEXT_LENGTH=-1  # No limit for local development
+      - DEFAULT_LANGUAGE=a
+      - VOICE_CACHE_DURATION=3600
+      
+      # Performance settings for development
+      - MAX_WORKERS=2
+      - REQUEST_TIMEOUT=300
+    volumes:
+      - .:/app  # Mount source code for development
+      - model_cache:/root/.cache  # Cache models between runs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Optional Redis service for testing rate limiting in development
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    profiles:
+      - redis  # Only start when explicitly requested
+
+  # Optional PostgreSQL database for testing API keys in development
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: kokorotts
+      POSTGRES_USER: kokoro
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    profiles:
+      - database  # Only start when explicitly requested
+
+volumes:
+  model_cache:
+    driver: local
+  redis_data:
+    driver: local
+  postgres_data:
+    driver: local
+
+# Usage Examples:
+#
+# Basic development (SQLite for API keys):
+# docker-compose up
+#
+# With Redis for rate limiting:
+# docker-compose --profile redis up
+#
+# With PostgreSQL for API keys:
+# docker-compose --profile database up
+#
+# Full production-like testing:
+# docker-compose --profile redis --profile database up
+#
+# For production-like testing with all features enabled:
+# Create docker-compose.override.yml with:
+# services:
+#   kokoro-api:
+#     environment:
+#       - RATE_LIMITING_ENABLED=true
+#       - DEPLOYMENT_MODE=cloud
+#       - RATE_LIMIT_USE_REDIS=true
+#       - REDIS_URL=redis://redis:6379/0
+#       - API_KEY_AUTHENTICATION=true
+#       - API_KEY_DATABASE_URL=postgresql://kokoro:password@postgres:5432/kokorotts

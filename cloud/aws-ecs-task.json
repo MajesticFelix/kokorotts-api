@@ -1,0 +1,61 @@
+{
+  "family": "kokorotts-api",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::YOUR_ACCOUNT:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::YOUR_ACCOUNT:role/ecsTaskRole",
+  "containerDefinitions": [
+    {
+      "name": "kokorotts-api",
+      "image": "YOUR_ECR_REPO/kokorotts-api:latest",
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {"name": "RATE_LIMITING_ENABLED", "value": "true"},
+        {"name": "DEPLOYMENT_MODE", "value": "cloud"},
+        {"name": "DEBUG", "value": "false"},
+        {"name": "LOG_LEVEL", "value": "INFO"},
+        {"name": "HOST", "value": "0.0.0.0"},
+        {"name": "PORT", "value": "8000"},
+        {"name": "CORS_ORIGINS", "value": "https://yourdomain.com"},
+        {"name": "TRUST_PROXY_HEADERS", "value": "true"},
+        {"name": "RATE_LIMIT_REQUESTS_PER_MINUTE", "value": "30"},
+        {"name": "RATE_LIMIT_REQUESTS_PER_HOUR", "value": "200"},
+        {"name": "RATE_LIMIT_REQUESTS_PER_DAY", "value": "1000"},
+        {"name": "RATE_LIMIT_MAX_CHARS_PER_REQUEST", "value": "5000"},
+        {"name": "RATE_LIMIT_CHARS_PER_HOUR", "value": "50000"},
+        {"name": "RATE_LIMIT_CHARS_PER_DAY", "value": "200000"},
+        {"name": "RATE_LIMIT_MAX_CONCURRENT", "value": "3"},
+        {"name": "RATE_LIMIT_USE_REDIS", "value": "true"},
+        {"name": "REDIS_URL", "value": "redis://your-elasticache-cluster:6379/0"},
+        {"name": "MAX_TEXT_LENGTH", "value": "50000"},
+        {"name": "DEFAULT_LANGUAGE", "value": "a"},
+        {"name": "VOICE_CACHE_DURATION", "value": "3600"},
+        {"name": "MAX_WORKERS", "value": "4"},
+        {"name": "REQUEST_TIMEOUT", "value": "300"}
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/kokorotts-api",
+          "awslogs-region": "us-west-2",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      },
+      "essential": true
+    }
+  ]
+}

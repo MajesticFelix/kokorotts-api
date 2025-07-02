@@ -1,0 +1,112 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "containerGroupName": {
+      "type": "string",
+      "defaultValue": "kokorotts-api",
+      "metadata": {
+        "description": "Name for the container group"
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Location for all resources"
+      }
+    },
+    "dnsNameLabel": {
+      "type": "string",
+      "metadata": {
+        "description": "DNS name label for the container group"
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.ContainerInstance/containerGroups",
+      "apiVersion": "2021-09-01",
+      "name": "[parameters('containerGroupName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "containers": [
+          {
+            "name": "kokorotts-api",
+            "properties": {
+              "image": "yourregistry.azurecr.io/kokorotts-api:latest",
+              "ports": [
+                {
+                  "port": 8000,
+                  "protocol": "TCP"
+                }
+              ],
+              "environmentVariables": [
+                {"name": "RATE_LIMITING_ENABLED", "value": "true"},
+                {"name": "DEPLOYMENT_MODE", "value": "cloud"},
+                {"name": "DEBUG", "value": "false"},
+                {"name": "LOG_LEVEL", "value": "INFO"},
+                {"name": "HOST", "value": "0.0.0.0"},
+                {"name": "PORT", "value": "8000"},
+                {"name": "CORS_ORIGINS", "value": "https://yourdomain.com"},
+                {"name": "TRUST_PROXY_HEADERS", "value": "true"},
+                {"name": "RATE_LIMIT_REQUESTS_PER_MINUTE", "value": "30"},
+                {"name": "RATE_LIMIT_REQUESTS_PER_HOUR", "value": "200"},
+                {"name": "RATE_LIMIT_REQUESTS_PER_DAY", "value": "1000"},
+                {"name": "RATE_LIMIT_MAX_CHARS_PER_REQUEST", "value": "5000"},
+                {"name": "RATE_LIMIT_CHARS_PER_HOUR", "value": "50000"},
+                {"name": "RATE_LIMIT_CHARS_PER_DAY", "value": "200000"},
+                {"name": "RATE_LIMIT_MAX_CONCURRENT", "value": "3"},
+                {"name": "RATE_LIMIT_USE_REDIS", "value": "true"},
+                {"name": "REDIS_URL", "value": "redis://your-azure-cache:6379/0"},
+                {"name": "MAX_TEXT_LENGTH", "value": "50000"},
+                {"name": "DEFAULT_LANGUAGE", "value": "a"},
+                {"name": "VOICE_CACHE_DURATION", "value": "3600"},
+                {"name": "MAX_WORKERS", "value": "4"},
+                {"name": "REQUEST_TIMEOUT", "value": "300"}
+              ],
+              "resources": {
+                "requests": {
+                  "cpu": 2,
+                  "memoryInGB": 4
+                }
+              },
+              "livenessProbe": {
+                "httpGet": {
+                  "path": "/health",
+                  "port": 8000
+                },
+                "initialDelaySeconds": 60,
+                "periodSeconds": 30,
+                "timeoutSeconds": 10,
+                "failureThreshold": 3
+              }
+            }
+          }
+        ],
+        "osType": "Linux",
+        "ipAddress": {
+          "type": "Public",
+          "ports": [
+            {
+              "port": 8000,
+              "protocol": "TCP"
+            }
+          ],
+          "dnsNameLabel": "[parameters('dnsNameLabel')]"
+        },
+        "restartPolicy": "Always"
+      }
+    }
+  ],
+  "outputs": {
+    "containerIPv4Address": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ContainerInstance/containerGroups', parameters('containerGroupName'))).ipAddress.ip]"
+    },
+    "containerFQDN": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ContainerInstance/containerGroups', parameters('containerGroupName'))).ipAddress.fqdn]"
+    }
+  }
+}
