@@ -466,6 +466,10 @@ def setup_rate_limiting(app):
         logger.info("Rate limiting is disabled")
         return None, None, None
     
+    if not SLOWAPI_AVAILABLE:
+        logger.warning("Rate limiting disabled - slowapi not available")
+        return None, None, None
+    
     logger.info(f"Setting up rate limiting for {config.rate_limit.deployment_mode} deployment")
     
     # Create stores
@@ -479,6 +483,52 @@ def setup_rate_limiting(app):
         # Set the limiter on app state for slowapi middleware
         app.state.limiter = limiter
         
+        # Set up rate limit exceeded handler BEFORE adding middleware
+        @app.exception_handler(RateLimitExceeded)
+        async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+            """Handle rate limit exceeded exceptions."""
+            # Track metrics for slowapi rate limits
+            _metrics_data["total_requests_blocked"] += 1
+            _metrics_data["requests_blocked_by_type"]["requests"] += 1
+            
+            # Get readable limit description
+            limit_description = "Rate limit exceeded"
+            retry_after = 60  # Default 1 minute
+            
+            try:
+                # slowapi limit objects have amount and per attributes
+                if hasattr(exc, 'limit') and exc.limit:
+                    limit_obj = exc.limit
+                    if hasattr(limit_obj, 'amount') and hasattr(limit_obj, 'per'):
+                        amount = limit_obj.amount
+                        per = limit_obj.per
+                        limit_description = f"{amount} per {per}"
+                        
+                        # Calculate retry time based on period
+                        if per == 60 or "minute" in str(per):
+                            retry_after = 60
+                        elif per == 3600 or "hour" in str(per):
+                            retry_after = 3600
+                        elif per == 86400 or "day" in str(per):
+                            retry_after = 86400
+                    else:
+                        limit_description = str(exc.limit)
+            except Exception as e:
+                logger.warning(f"Error parsing rate limit: {e}")
+            
+            logger.info(f"Rate limit exceeded: {limit_description}")
+            
+            response = JSONResponse(
+                status_code=429,
+                content=format_rate_limit_error(
+                    "requests",
+                    limit_description,
+                    retry_after
+                )
+            )
+            response.headers["Retry-After"] = str(retry_after)
+            return response
+        
         # Add slowapi middleware for basic rate limiting
         app.add_middleware(SlowAPIMiddleware)
         
@@ -489,26 +539,6 @@ def setup_rate_limiting(app):
             concurrent_store=concurrent_store,
             enabled=True
         )
-        
-        # Set up rate limit exceeded handler
-        @app.exception_handler(RateLimitExceeded)
-        async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
-            """Handle rate limit exceeded exceptions."""
-            # Track metrics for slowapi rate limits
-            _metrics_data["total_requests_blocked"] += 1
-            _metrics_data["requests_blocked_by_type"]["requests"] += 1
-            
-            response = JSONResponse(
-                status_code=429,
-                content=format_rate_limit_error(
-                    "requests",
-                    str(exc.detail),
-                    int(exc.retry_after) if exc.retry_after else 60
-                )
-            )
-            if exc.retry_after:
-                response.headers["Retry-After"] = str(int(exc.retry_after))
-            return response
         
         logger.info("Rate limiting middleware configured successfully")
     

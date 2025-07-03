@@ -177,7 +177,8 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
             "/health",
             "/metrics",
             "/favicon.ico",
-            "/static/"
+            "/static/",
+            "/test-rate-limit"
         ]
         
         return any(path.startswith(skip_path) for skip_path in skip_paths)

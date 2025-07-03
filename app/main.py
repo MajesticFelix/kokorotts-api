@@ -541,27 +541,37 @@ def validate_speech_request(request: OpenAISpeechRequest) -> None:
         )
 
 def apply_rate_limiting_decorator(func):
-    """Apply rate limiting decorator if rate limiting is enabled."""
+    """Apply rate limiting decorator if rate limiting is enabled.
+    
+    NOTE: Disabled for TTS endpoints - our middleware provides better rate limiting
+    with character limits, concurrent limits, and API key support.
+    """
     if rate_limiter and is_rate_limiting_enabled():
-        # Apply multiple rate limits for the speech endpoint
-        config = get_config()
+        # NOTE: Commented out slowapi decorators due to compatibility issues with FastAPI Pydantic models
+        # Our RateLimitMiddleware provides superior rate limiting anyway
+        logger.info("Rate limiting handled by middleware (slowapi decorators disabled for compatibility)")
         
-        # Request rate limits
-        func = rate_limiter.limit(f"{config.rate_limit.requests_per_minute}/minute")(func)
-        func = rate_limiter.limit(f"{config.rate_limit.requests_per_hour}/hour")(func)
-        func = rate_limiter.limit(f"{config.rate_limit.requests_per_day}/day")(func)
+        # Future: Could add slowapi decorators for endpoints that use raw Request objects
+        # config = get_config()
+        # func = rate_limiter.limit(f"{config.rate_limit.requests_per_minute}/minute")(func)
+        # func = rate_limiter.limit(f"{config.rate_limit.requests_per_hour}/hour")(func)
+        # func = rate_limiter.limit(f"{config.rate_limit.requests_per_day}/day")(func)
         
-        logger.info("Applied rate limiting decorators to speech endpoint")
     return func
 
 def apply_light_rate_limiting_decorator(func):
-    """Apply lighter rate limiting for informational endpoints."""
+    """Apply lighter rate limiting for informational endpoints.
+    
+    NOTE: Disabled to avoid compatibility issues. Middleware provides rate limiting.
+    """
     if rate_limiter and is_rate_limiting_enabled():
-        # Lighter limits for voices/languages endpoints (they're cached anyway)
-        func = rate_limiter.limit("60/minute")(func)  # Higher limit for info endpoints
-        func = rate_limiter.limit("500/hour")(func)
+        # NOTE: Commented out slowapi decorators - middleware handles rate limiting
+        logger.info("Rate limiting handled by middleware (slowapi decorators disabled for compatibility)")
         
-        logger.info("Applied light rate limiting decorators to informational endpoint")
+        # Future: Could add decorators for endpoints that need them and are compatible
+        # func = rate_limiter.limit("60/minute")(func)  # Higher limit for info endpoints
+        # func = rate_limiter.limit("500/hour")(func)
+        
     return func
 
 @openai_router.post("/audio/speech", tags=["Audio"], response_model=None)
@@ -1119,6 +1129,14 @@ async def get_rate_limit_config():
             "max_violations_per_hour": config.rate_limit.max_violations_per_hour
         }
     }
+
+# Test endpoint with direct slowapi decorator
+if rate_limiter:
+    @app.get("/test-rate-limit")
+    @rate_limiter.limit("2/minute")
+    async def test_rate_limit(request: Request):
+        """Test endpoint to verify slowapi functionality."""
+        return {"message": "Rate limit test", "timestamp": time.time()}
 
 # Include OpenAI router in main app
 app.include_router(openai_router)
