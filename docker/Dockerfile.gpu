@@ -1,0 +1,144 @@
+# KokoroTTS API - GPU Optimized Build
+# CUDA-enabled build for GPU acceleration
+# Based on NVIDIA CUDA runtime image
+
+FROM nvidia/cuda:12.1-runtime-ubuntu22.04 as base
+
+# Install Python 3.12 from deadsnakes PPA
+RUN apt-get update && apt-get install -y \
+    software-properties-common \
+    && add-apt-repository ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y \
+    python3.12 \
+    python3.12-dev \
+    python3.12-distutils \
+    python3-pip \
+    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 \
+    && update-alternatives --install /usr/bin/python python /usr/bin/python3.12 1
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    CUDA_VISIBLE_DEVICES=0
+
+# Install system dependencies with CUDA support
+RUN apt-get update && apt-get install -y \
+    # Build essentials
+    build-essential \
+    cmake \
+    pkg-config \
+    # CUDA development tools
+    cuda-toolkit-12-1 \
+    # Audio processing
+    ffmpeg \
+    libsndfile1 \
+    libsox-dev \
+    espeak-ng \
+    espeak-ng-data \
+    # System utilities
+    curl \
+    git \
+    wget \
+    unzip \
+    # Additional GPU libraries
+    libnvidia-compute-520 \
+    libnvidia-decode-520 \
+    libnvidia-encode-520 \
+    # Cleanup
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get autoremove -y
+
+# Upgrade pip and install basic tools
+RUN python -m pip install --upgrade pip setuptools wheel
+
+# Create non-root user
+RUN groupadd -r kokorotts && useradd -r -g kokorotts -s /bin/bash kokorotts
+
+# Set work directory
+WORKDIR /app
+
+# ================================
+# Stage 2: GPU Dependencies
+# ================================
+FROM base as dependencies
+
+# Copy requirements
+COPY requirements.txt .
+
+# Install GPU-optimized Python dependencies
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    # Install PyTorch with CUDA support (GPU-optimized)
+    pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cu121 && \
+    # Install other dependencies including NVIDIA packages
+    pip install --no-cache-dir -r requirements.txt
+
+# ================================
+# Stage 3: Application
+# ================================
+FROM dependencies as application
+
+# Copy application code
+COPY app/ ./app/
+COPY static/ ./static/
+COPY LICENSE ./
+
+# Create directories and set permissions
+RUN mkdir -p /app/logs /app/cache /app/models && \
+    chown -R kokorotts:kokorotts /app
+
+# ================================
+# Stage 4: Runtime (Final)
+# ================================
+FROM application as runtime
+
+# Copy helper scripts
+COPY docker/healthcheck.py ./docker/
+COPY docker/entrypoint.sh ./docker/
+
+# Make scripts executable
+RUN chmod +x ./docker/entrypoint.sh ./docker/healthcheck.py
+
+# Switch to non-root user
+USER kokorotts
+
+# Expose port
+EXPOSE 8000
+
+# GPU-optimized health check
+HEALTHCHECK --interval=30s --timeout=15s --start-period=90s --retries=3 \
+    CMD python docker/healthcheck.py
+
+# GPU-optimized environment variables
+ENV HOST=0.0.0.0 \
+    PORT=8000 \
+    WORKERS=1 \
+    LOG_LEVEL=info \
+    KOKORO_CACHE_DIR=/app/cache \
+    KOKORO_MODEL_DIR=/app/models \
+    KOKORO_DEVICE=cuda \
+    CUDA_VISIBLE_DEVICES=0 \
+    NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+# Use entrypoint script
+ENTRYPOINT ["./docker/entrypoint.sh"]
+
+# Default command optimized for GPU (single worker for GPU efficiency)
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+
+# Build-time labels
+LABEL maintainer="KokoroTTS API" \
+      description="GPU-accelerated KokoroTTS API with CUDA support" \
+      version="1.0.0-gpu" \
+      variant="gpu" \
+      cuda.version="12.1" \
+      org.opencontainers.image.title="KokoroTTS API (GPU)" \
+      org.opencontainers.image.description="GPU-accelerated FastAPI wrapper for KokoroTTS model with CUDA support" \
+      org.opencontainers.image.url="https://github.com/MajesticFelix/kokorotts-api" \
+      org.opencontainers.image.source="https://github.com/MajesticFelix/kokorotts-api" \
+      org.opencontainers.image.vendor="KokoroTTS" \
+      org.opencontainers.image.licenses="Apache-2.0"

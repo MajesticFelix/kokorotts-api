@@ -1,0 +1,119 @@
+# KokoroTTS API - CPU Optimized Build
+# Smaller, faster build for CPU-only deployments
+# Optimized for production CPU workloads
+
+FROM python:3.12-slim as base
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    DEBIAN_FRONTEND=noninteractive
+
+# Install minimal system dependencies for CPU-only
+RUN apt-get update && apt-get install -y \
+    # Essential build tools (minimal set)
+    build-essential \
+    pkg-config \
+    # Audio processing (required for TTS)
+    ffmpeg \
+    libsndfile1 \
+    espeak-ng \
+    espeak-ng-data \
+    # System utilities (minimal)
+    curl \
+    git \
+    # Cleanup
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get autoremove -y
+
+# Create non-root user
+RUN groupadd -r kokorotts && useradd -r -g kokorotts -s /bin/bash kokorotts
+
+# Set work directory
+WORKDIR /app
+
+# ================================
+# Stage 2: Dependencies (CPU optimized)
+# ================================
+FROM base as dependencies
+
+# Copy requirements
+COPY requirements.txt .
+
+# Create CPU-optimized requirements by filtering out GPU-specific packages
+RUN grep -v "nvidia-" requirements.txt > requirements_cpu.txt
+
+# Install Python dependencies optimized for CPU
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    # Install CPU-only PyTorch (smaller, faster download)
+    pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu && \
+    # Install other dependencies (excluding GPU packages)
+    pip install --no-cache-dir -r requirements_cpu.txt
+
+# ================================
+# Stage 3: Application
+# ================================
+FROM dependencies as application
+
+# Copy application code
+COPY app/ ./app/
+COPY static/ ./static/
+COPY LICENSE ./
+
+# Create directories and set permissions
+RUN mkdir -p /app/logs /app/cache /app/models && \
+    chown -R kokorotts:kokorotts /app
+
+# ================================
+# Stage 4: Runtime (Final)
+# ================================
+FROM application as runtime
+
+# Copy helper scripts
+COPY docker/healthcheck.py ./docker/
+COPY docker/entrypoint.sh ./docker/
+
+# Make scripts executable
+RUN chmod +x ./docker/entrypoint.sh ./docker/healthcheck.py
+
+# Switch to non-root user
+USER kokorotts
+
+# Expose port
+EXPOSE 8000
+
+# CPU-optimized health check (faster interval for CPU)
+HEALTHCHECK --interval=20s --timeout=5s --start-period=45s --retries=3 \
+    CMD python docker/healthcheck.py
+
+# CPU-optimized environment variables
+ENV HOST=0.0.0.0 \
+    PORT=8000 \
+    WORKERS=2 \
+    LOG_LEVEL=info \
+    KOKORO_CACHE_DIR=/app/cache \
+    KOKORO_MODEL_DIR=/app/models \
+    KOKORO_DEVICE=cpu \
+    OMP_NUM_THREADS=2 \
+    MKL_NUM_THREADS=2
+
+# Use entrypoint script
+ENTRYPOINT ["./docker/entrypoint.sh"]
+
+# Default command optimized for CPU
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+
+# Build-time labels
+LABEL maintainer="KokoroTTS API" \
+      description="CPU-optimized KokoroTTS API for production CPU workloads" \
+      version="1.0.0-cpu" \
+      variant="cpu" \
+      org.opencontainers.image.title="KokoroTTS API (CPU)" \
+      org.opencontainers.image.description="CPU-optimized FastAPI wrapper for KokoroTTS model" \
+      org.opencontainers.image.url="https://github.com/MajesticFelix/kokorotts-api" \
+      org.opencontainers.image.source="https://github.com/MajesticFelix/kokorotts-api" \
+      org.opencontainers.image.vendor="KokoroTTS" \
+      org.opencontainers.image.licenses="Apache-2.0"

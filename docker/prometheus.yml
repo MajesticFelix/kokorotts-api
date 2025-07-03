@@ -1,0 +1,72 @@
+# Prometheus configuration for KokoroTTS API monitoring
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'kokorotts-monitor'
+
+# Alertmanager configuration (optional)
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets:
+#           - alertmanager:9093
+
+# Rule files (for alerting rules)
+# rule_files:
+#   - "alerts/*.yml"
+
+# Scrape configurations
+scrape_configs:
+  # KokoroTTS API metrics
+  - job_name: 'kokorotts-api'
+    static_configs:
+      - targets: ['kokorotts-api:8000']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    honor_labels: true
+    
+    # Relabeling to add instance information
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'kokorotts-api'
+      - source_labels: [__address__]
+        target_label: service
+        replacement: 'kokorotts-tts'
+
+  # Nginx metrics (if nginx-prometheus-exporter is used)
+  - job_name: 'nginx'
+    static_configs:
+      - targets: ['nginx:9113']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    honor_labels: true
+    
+  # Node exporter (system metrics)
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    scrape_interval: 30s
+    honor_labels: true
+
+  # Redis metrics (if redis-exporter is used)
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+    scrape_interval: 30s
+    honor_labels: true
+
+  # Docker container metrics (if cAdvisor is used)
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    scrape_interval: 30s
+    honor_labels: true
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    scrape_interval: 30s

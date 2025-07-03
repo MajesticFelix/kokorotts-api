@@ -1,0 +1,192 @@
+# KokoroTTS API - Docker Compose Configuration
+# Supports CPU and GPU deployments with optional services
+version: '3.8'
+
+x-common-variables: &common-env
+  HOST: 0.0.0.0
+  PORT: 8000
+  LOG_LEVEL: info
+  KOKORO_CACHE_DIR: /app/cache
+  KOKORO_MODEL_DIR: /app/models
+
+services:
+  # Main KokoroTTS API service (CPU version)
+  kokorotts-api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.cpu
+      args:
+        BUILD_ENV: production
+    container_name: kokorotts-api
+    ports:
+      - "8000:8000"
+    environment:
+      <<: *common-env
+      WORKERS: 2
+      KOKORO_DEVICE: cpu
+    volumes:
+      # Model cache for persistence
+      - kokorotts-models:/app/models
+      - kokorotts-cache:/app/cache
+      # Logs for debugging
+      - kokorotts-logs:/app/logs
+      # Optional: Mount static files for development
+      # - ./static:/app/static:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "docker/healthcheck.py"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - kokorotts-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '1.0'
+          memory: 2G
+
+  # GPU version (uncomment to use instead of CPU version)
+  # kokorotts-api-gpu:
+  #   build:
+  #     context: ..
+  #     dockerfile: docker/Dockerfile.gpu
+  #     args:
+  #       BUILD_ENV: production
+  #   container_name: kokorotts-api-gpu
+  #   ports:
+  #     - "8000:8000"
+  #   environment:
+  #     <<: *common-env
+  #     WORKERS: 1
+  #     KOKORO_DEVICE: cuda
+  #     CUDA_VISIBLE_DEVICES: 0
+  #     NVIDIA_VISIBLE_DEVICES: all
+  #     NVIDIA_DRIVER_CAPABILITIES: compute,utility
+  #   volumes:
+  #     - kokorotts-models:/app/models
+  #     - kokorotts-cache:/app/cache
+  #     - kokorotts-logs:/app/logs
+  #   restart: unless-stopped
+  #   runtime: nvidia
+  #   healthcheck:
+  #     test: ["CMD", "python", "docker/healthcheck.py"]
+  #     interval: 30s
+  #     timeout: 15s
+  #     retries: 3
+  #     start_period: 90s
+  #   networks:
+  #     - kokorotts-network
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: 1
+  #             capabilities: [gpu]
+
+  # Nginx reverse proxy (optional for production)
+  nginx:
+    image: nginx:alpine
+    container_name: kokorotts-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      kokorotts-api:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - kokorotts-network
+    profiles:
+      - production
+      - nginx
+
+  # Prometheus monitoring (optional)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: kokorotts-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    networks:
+      - kokorotts-network
+    profiles:
+      - monitoring
+
+  # Grafana dashboard (optional)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: kokorotts-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    depends_on:
+      - prometheus
+    networks:
+      - kokorotts-network
+    profiles:
+      - monitoring
+
+  # Redis cache (optional for enhanced performance)
+  redis:
+    image: redis:7-alpine
+    container_name: kokorotts-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    networks:
+      - kokorotts-network
+    profiles:
+      - cache
+      - production
+
+volumes:
+  # Persistent volumes for application data
+  kokorotts-models:
+    driver: local
+  kokorotts-cache:
+    driver: local
+  kokorotts-logs:
+    driver: local
+  
+  # Monitoring volumes
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+  
+  # Cache volume
+  redis-data:
+    driver: local
+
+networks:
+  kokorotts-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

@@ -1,0 +1,117 @@
+# KokoroTTS API - Development Overrides
+# Use with: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+version: '3.8'
+
+services:
+  kokorotts-api:
+    # Development build with hot reload
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: dependencies  # Stop at dependencies stage for faster rebuilds
+      args:
+        BUILD_ENV: development
+    environment:
+      LOG_LEVEL: debug
+      WORKERS: 1  # Single worker for debugging
+      RELOAD: true  # Enable auto-reload
+      DEBUG: true
+    volumes:
+      # Mount source code for hot reload
+      - ../app:/app/app:rw
+      - ../static:/app/static:rw
+      # Development logs and cache
+      - kokorotts-models:/app/models
+      - kokorotts-cache:/app/cache
+      - ../logs:/app/logs:rw
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--log-level", "debug"]
+    ports:
+      - "8000:8000"
+      - "5678:5678"  # Debugger port
+    # Disable health check in development
+    healthcheck:
+      disable: true
+    # No resource limits in development
+    deploy: {}
+
+  # Development database (SQLite)
+  kokorotts-db:
+    image: alpine:latest
+    container_name: kokorotts-db-dev
+    volumes:
+      - ../dev-data:/data
+    command: tail -f /dev/null  # Keep container running
+    networks:
+      - kokorotts-network
+    profiles:
+      - database
+
+  # Disable production services in development
+  nginx:
+    profiles:
+      - never  # Don't run nginx in development
+
+  prometheus:
+    profiles:
+      - monitoring-dev  # Only run if explicitly requested
+
+  grafana:
+    profiles:
+      - monitoring-dev  # Only run if explicitly requested
+
+  redis:
+    profiles:
+      - cache-dev  # Only run if explicitly requested
+
+  # Development tools
+  # Jupyter notebook for experimentation
+  jupyter:
+    image: jupyter/scipy-notebook:latest
+    container_name: kokorotts-jupyter
+    ports:
+      - "8888:8888"
+    volumes:
+      - ../notebooks:/home/jovyan/work
+      - ../app:/home/jovyan/work/app:ro
+    environment:
+      JUPYTER_ENABLE_LAB: yes
+      JUPYTER_TOKEN: development
+    networks:
+      - kokorotts-network
+    profiles:
+      - jupyter
+
+  # pgAdmin for database management (if needed)
+  adminer:
+    image: adminer:latest
+    container_name: kokorotts-adminer
+    ports:
+      - "8080:8080"
+    networks:
+      - kokorotts-network
+    profiles:
+      - admin
+
+  # Development file watcher
+  filewatcher:
+    image: node:alpine
+    container_name: kokorotts-watcher
+    working_dir: /app
+    volumes:
+      - ..:/app
+    command: >
+      sh -c "npm install -g nodemon && 
+             nodemon --watch app --watch static --ext py,html,css,js --exec 'echo File changed at $$(date)'"
+    networks:
+      - kokorotts-network
+    profiles:
+      - watcher
+
+# Development volumes (local bind mounts)
+volumes:
+  kokorotts-models:
+    driver: local
+  kokorotts-cache:
+    driver: local
+  kokorotts-logs:
+    driver: local

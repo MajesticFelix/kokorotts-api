@@ -1,0 +1,131 @@
+# KokoroTTS API - Production Overrides
+# Use with: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+version: '3.8'
+
+services:
+  kokorotts-api:
+    # Production optimizations
+    environment:
+      LOG_LEVEL: warning
+      WORKERS: 4
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 8G
+        reservations:
+          cpus: '2.0'
+          memory: 4G
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+    # Remove development mounts
+    volumes:
+      - kokorotts-models:/app/models
+      - kokorotts-cache:/app/cache
+      - kokorotts-logs:/app/logs
+    healthcheck:
+      interval: 60s
+      timeout: 30s
+      retries: 5
+      start_period: 120s
+
+  # Enable nginx in production
+  nginx:
+    profiles: []  # Always run in production
+    environment:
+      NGINX_HOST: localhost
+      NGINX_PORT: 80
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro  # For SSL certificates
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+
+  # Enable monitoring in production
+  prometheus:
+    profiles: []  # Always run in production
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 256M
+
+  grafana:
+    profiles: []  # Always run in production
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD_FILE: /run/secrets/grafana_admin_password
+      GF_USERS_ALLOW_SIGN_UP: false
+      GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-simple-json-datasource
+    secrets:
+      - grafana_admin_password
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 256M
+
+  # Enable Redis cache in production
+  redis:
+    profiles: []  # Always run in production
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    deploy:
+      resources:
+        limits:
+          cpus: '0.2'
+          memory: 256M
+        reservations:
+          cpus: '0.05'
+          memory: 128M
+
+  # Log aggregation (optional)
+  fluent-bit:
+    image: fluent/fluent-bit:latest
+    container_name: kokorotts-fluent-bit
+    volumes:
+      - ./fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+      - kokorotts-logs:/app/logs:ro
+    networks:
+      - kokorotts-network
+    profiles:
+      - logging
+
+secrets:
+  grafana_admin_password:
+    file: ../secrets/grafana_admin_password.txt
+
+# Production-grade volume configuration
+volumes:
+  kokorotts-models:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/kokorotts/models
+  kokorotts-cache:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/kokorotts/cache
+  kokorotts-logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/kokorotts/logs

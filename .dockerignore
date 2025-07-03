@@ -1,0 +1,133 @@
+# Git and version control
+.git
+.gitignore
+.gitattributes
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+.env/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Documentation and markdown (except README)
+*.md
+!README.md
+docs/
+*.rst
+
+# Test files and coverage
+.pytest_cache/
+.coverage
+.nyc_output
+htmlcov/
+.tox/
+.coverage.*
+coverage.xml
+*.cover
+.hypothesis/
+tests/
+test_*.py
+*_test.py
+
+# Logs and temporary files
+*.log
+server.log
+*.tmp
+*.temp
+.cache/
+.pytest_cache/
+
+# Development and build artifacts
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Docker files (to avoid recursive copying)
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Environment and secrets
+.env
+.env.local
+.env.production
+.env.development
+.env.test*
+*.key
+*.pem
+*.crt
+
+# Model cache and data (will be volume mounted instead)
+models/
+data/
+cache/
+.cache/
+
+# Backup and temporary files
+*.bak
+*.backup
+*.old
+*.orig
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# PyTorch model files (let them download fresh)
+*.pt
+*.pth
+*.ckpt
+
+# CUDA compilation cache
+.nv/
+
+# Jupyter notebooks
+*.ipynb
+.ipynb_checkpoints/
+
+# Configuration files that shouldn't be in container
+*.conf
+*.config
+!requirements.txt
+!app/
+!static/
+!LICENSE
