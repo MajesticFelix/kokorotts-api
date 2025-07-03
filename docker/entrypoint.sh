@@ -36,6 +36,9 @@ export LOG_LEVEL=${LOG_LEVEL:-info}
 export KOKORO_CACHE_DIR=${KOKORO_CACHE_DIR:-/app/cache}
 export KOKORO_MODEL_DIR=${KOKORO_MODEL_DIR:-/app/models}
 export KOKORO_DEVICE=${KOKORO_DEVICE:-auto}
+export HOME=${HOME:-/home/kokorotts}
+export HF_HOME=${HF_HOME:-/app/cache/huggingface}
+export TRANSFORMERS_CACHE=${TRANSFORMERS_CACHE:-/app/cache/transformers}
 
 # Function to detect device capability
 detect_device() {
@@ -73,6 +76,9 @@ create_directories() {
         "$KOKORO_CACHE_DIR"
         "$KOKORO_MODEL_DIR"
         "/app/logs"
+        "$HF_HOME"
+        "$TRANSFORMERS_CACHE"
+        "/home/kokorotts"
     )
     
     for dir in "${directories[@]}"; do

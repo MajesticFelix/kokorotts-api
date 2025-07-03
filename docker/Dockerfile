@@ -40,7 +40,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user for security
-RUN groupadd -r kokorotts && useradd -r -g kokorotts -s /bin/bash kokorotts
+RUN groupadd -r kokorotts && useradd -r -g kokorotts -s /bin/bash -m kokorotts
 
 # Set work directory
 WORKDIR /app
@@ -73,8 +73,9 @@ COPY static/ ./static/
 COPY LICENSE ./
 
 # Create directories for runtime
-RUN mkdir -p /app/logs /app/cache /app/models && \
-    chown -R kokorotts:kokorotts /app
+RUN mkdir -p /app/logs /app/cache /app/models /app/cache/huggingface /app/cache/transformers && \
+    chown -R kokorotts:kokorotts /app && \
+    chown -R kokorotts:kokorotts /home/kokorotts
 
 # ================================
 # Stage 4: Runtime (Final)
@@ -104,7 +105,10 @@ ENV HOST=0.0.0.0 \
     WORKERS=1 \
     LOG_LEVEL=info \
     KOKORO_CACHE_DIR=/app/cache \
-    KOKORO_MODEL_DIR=/app/models
+    KOKORO_MODEL_DIR=/app/models \
+    HOME=/home/kokorotts \
+    HF_HOME=/app/cache/huggingface \
+    TRANSFORMERS_CACHE=/app/cache/transformers
 
 # Use entrypoint script for flexibility
 ENTRYPOINT ["./docker/entrypoint.sh"]

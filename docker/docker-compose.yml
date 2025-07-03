@@ -8,6 +8,9 @@ x-common-variables: &common-env
   LOG_LEVEL: info
   KOKORO_CACHE_DIR: /app/cache
   KOKORO_MODEL_DIR: /app/models
+  HOME: /home/kokorotts
+  HF_HOME: /app/cache/huggingface
+  TRANSFORMERS_CACHE: /app/cache/transformers
 
 services:
   # Main KokoroTTS API service (CPU version)

@@ -636,6 +636,17 @@ docker-compose -f docker/docker-compose.yml down && docker-compose -f docker/doc
 
 # Check if running as correct user
 docker exec kokorotts-api id
+
+# If you see "Permission denied: '/home/kokorotts'" errors:
+# This indicates the user home directory wasn't created properly
+# Rebuild the container:
+docker-compose -f docker/docker-compose.yml down
+docker-compose -f docker/docker-compose.yml build --no-cache
+docker-compose -f docker/docker-compose.yml up -d
+
+# Or check/fix home directory permissions manually:
+docker exec kokorotts-api ls -la /home/
+docker exec -u root kokorotts-api chown kokorotts:kokorotts /home/kokorotts
 ```
 
 **Network connectivity:**
