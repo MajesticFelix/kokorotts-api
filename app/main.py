@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from huggingface_hub import list_repo_files
 from pydantic import BaseModel, Field
 
+from .config import get_settings, validate_configuration
 from .tts_engine import (
     _device,
     _pipelines,
@@ -31,37 +32,21 @@ from .tts_engine import (
     synthesize_with_voice_blend,
 )
 
+# Get configuration
+config = get_settings()
+
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+log_level = getattr(logging, config.api.log_level.upper(), logging.INFO)
+logging.basicConfig(level=log_level)
 logger = logging.getLogger(__name__)
 
 # Global startup time tracker
 startup_time = time.time()
 
-# API Configuration
-API_CONFIG = {
-    "supported_formats": ["wav", "mp3", "flac", "ogg", "opus"],
-    "min_speed": 0.25,
-    "max_speed": 4.0,
-    "voice_cache_duration": 3600,  # 1 hour
-    "default_language": "a",
-    "media_types": {
-        "wav": "audio/wav",
-        "flac": "audio/flac",
-        "ogg": "audio/ogg",
-        "mp3": "audio/mpeg",
-        "opus": "audio/opus",
-    },
-    # Long text processing configuration
-    "long_text_config": {
-        "memory_limit_mb": 1024  # 1GB audio buffer limit
-    }
-}
-
-# Legacy constants for backward compatibility
-SUPPORTED_FORMATS = API_CONFIG["supported_formats"]
-MIN_SPEED = API_CONFIG["min_speed"]
-MAX_SPEED = API_CONFIG["max_speed"]
+# Legacy constants for backward compatibility (now using config)
+SUPPORTED_FORMATS = config.api.supported_formats
+MIN_SPEED = config.api.min_speed
+MAX_SPEED = config.api.max_speed
 
 tags_metadata = [
     {
@@ -87,23 +72,23 @@ tags_metadata = [
 ]
 
 app = FastAPI(
-    title="Kokoro TTS API",
-    version="1.0.0",
-    description="OpenAI-compatible TTS API using Kokoro model with voice blending support",
+    title=config.api.title,
+    version=config.api.version,
+    description=config.api.description,
     openapi_tags=tags_metadata,
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url=config.api.docs_url,
+    redoc_url=config.api.redoc_url,
 )
 
 # Mount static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/static", StaticFiles(directory=config.api.static_directory), name="static")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=config.api.cors_origins,
+    allow_credentials=config.api.allow_credentials,
+    allow_methods=config.api.cors_methods,
+    allow_headers=config.api.cors_headers,
 )
 
 @app.get("/", tags=["Root"])
@@ -147,11 +132,11 @@ class OpenAISpeechRequest(BaseModel):
         min_length=1
     )
     voice: str = Field(
-        default="af_heart", 
+        default=config.api.default_voice, 
         description="Voice name or blended voices (e.g., 'af_bella+af_sky' or 'af_bella(2)+af_sky(1)')"
     )
     response_format: Optional[str] = Field(
-        default="mp3", 
+        default=config.api.default_format, 
         description="Audio format: wav, mp3, flac, ogg, opus"
     )
     speed: Optional[float] = Field(
@@ -169,7 +154,7 @@ class OpenAISpeechRequest(BaseModel):
         description="Include per-word timing information in response"
     )
     language: Optional[str] = Field(
-        default="a", 
+        default=config.api.default_language, 
         description="Language code (a=American English, b=British English, j=Japanese, z=Chinese, e=Spanish, f=French, h=Hindi, i=Italian, p=Portuguese)"
     )
 
@@ -279,7 +264,7 @@ def get_media_type(format_name: str) -> str:
     Returns:
         MIME type string for the format
     """
-    return API_CONFIG["media_types"].get(format_name.lower(), "audio/mpeg")
+    return config.get_media_types().get(format_name.lower(), "audio/mpeg")
 
 # Cache for voice list to avoid repeated API calls
 _voice_cache: Optional[List[str]] = None
@@ -301,12 +286,12 @@ def get_supported_voices() -> List[str]:
     if (
         _voice_cache is not None
         and _voice_cache_time is not None
-        and current_time - _voice_cache_time < API_CONFIG["voice_cache_duration"]
+        and current_time - _voice_cache_time < config.api.voice_cache_duration
     ):
         return _voice_cache
     
     try:
-        files = list_repo_files(repo_id="hexgrad/Kokoro-82M")
+        files = list_repo_files(repo_id=config.tts.repo_id)
         voice_files = [f for f in files if f.endswith(".pt") and "voices" in f]
         voices = [f.split("/")[-1].replace(".pt", "") for f in voice_files]
         
@@ -349,7 +334,7 @@ def get_supported_languages() -> List[Dict[str, str]]:
     """
     try:
         # Get voice files from repository
-        files = list_repo_files(repo_id="hexgrad/Kokoro-82M")
+        files = list_repo_files(repo_id=config.tts.repo_id)
         voice_files = [f for f in files if f.endswith(".pt") and "voices" in f]
         
         # Language mapping based on official Kokoro documentation
@@ -391,7 +376,7 @@ def validate_language_code(lang_code: str) -> str:
         ValueError: If language code is not supported
     """
     if not lang_code:
-        return API_CONFIG["default_language"]
+        return config.api.default_language
     
     lang_code = lang_code.lower().strip()
     language_map = get_language_map()
@@ -411,12 +396,12 @@ def validate_speech_request(request: OpenAISpeechRequest) -> None:
         HTTPException: For validation errors
     """
     # Validate format
-    if request.response_format not in API_CONFIG["supported_formats"]:
+    if request.response_format not in config.api.supported_formats:
         raise HTTPException(
             status_code=400,
             detail={
                 "error": {
-                    "message": f"Unsupported response_format: {request.response_format}. Supported: {', '.join(API_CONFIG['supported_formats'])}",
+                    "message": f"Unsupported response_format: {request.response_format}. Supported: {', '.join(config.api.supported_formats)}",
                     "type": "invalid_request_error",
                 }
             },
@@ -430,12 +415,12 @@ def validate_speech_request(request: OpenAISpeechRequest) -> None:
         )
     
     # Validate speed parameter
-    if not (API_CONFIG["min_speed"] <= request.speed <= API_CONFIG["max_speed"]):
+    if not (config.api.min_speed <= request.speed <= config.api.max_speed):
         raise HTTPException(
             status_code=400,
             detail={
                 "error": {
-                    "message": f"Speed must be between {API_CONFIG['min_speed']} and {API_CONFIG['max_speed']}",
+                    "message": f"Speed must be between {config.api.min_speed} and {config.api.max_speed}",
                     "type": "invalid_request_error",
                 }
             },
@@ -701,7 +686,7 @@ async def pipeline_status():
     
     return PipelineStatusResponse(
         loaded_languages=loaded_languages,
-        default_language=API_CONFIG["default_language"],
+        default_language=config.api.default_language,
         device=_device,
         pipeline_count=len(_pipelines),
         model_info={
@@ -710,6 +695,74 @@ async def pipeline_status():
             "supported_languages": "9 languages"
         }
     )
+
+@app.get("/config", tags=["Debug"])
+async def get_configuration():
+    """Get current configuration (non-sensitive values only)."""
+    try:
+        config = get_settings()
+        return {
+            "api": {
+                "title": config.api.title,
+                "version": config.api.version,
+                "supported_formats": config.api.supported_formats,
+                "min_speed": config.api.min_speed,
+                "max_speed": config.api.max_speed,
+                "default_language": config.api.default_language,
+                "default_voice": config.api.default_voice,
+                "default_format": config.api.default_format,
+                "cors_origins": config.api.cors_origins[:3] if len(config.api.cors_origins) > 3 else config.api.cors_origins,  # Limit for security
+            },
+            "tts": {
+                "device": config.tts.device,
+                "sample_rate": config.tts.sample_rate,
+                "default_chunk_size": config.tts.default_chunk_size,
+                "max_chunk_size": config.tts.max_chunk_size,
+                "streaming_chunk_size": config.tts.streaming_chunk_size,
+                "memory_limit_mb": config.tts.memory_limit_mb,
+                "batch_size": config.tts.batch_size,
+                "repo_id": config.tts.repo_id,
+            },
+            "security": {
+                "api_key_enabled": config.security.api_key_enabled,
+                "rate_limit_enabled": config.security.rate_limit_enabled,
+                "rate_limit_per_minute": config.security.rate_limit_per_minute if config.security.rate_limit_enabled else None,
+            },
+            "monitoring": {
+                "health_check_enabled": config.monitoring.health_check_enabled,
+                "metrics_enabled": config.monitoring.metrics_enabled,
+                "log_format": config.monitoring.log_format,
+            },
+            "environment": config.environment,
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"message": f"Failed to get configuration: {str(e)}", "type": "configuration_error"}}
+        )
+
+@app.get("/config/validate", tags=["Debug"])
+async def validate_config():
+    """Validate current configuration."""
+    try:
+        is_valid = validate_configuration()
+        return {
+            "valid": is_valid,
+            "message": "Configuration is valid",
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "valid": False,
+                "error": {
+                    "message": f"Configuration validation failed: {str(e)}",
+                    "type": "configuration_error"
+                },
+                "timestamp": datetime.now().isoformat()
+            }
+        )
 
 @app.get("/debug", response_model=DebugInfoResponse, tags=["Debug"])
 async def debug_info():
@@ -732,7 +785,7 @@ async def debug_info():
     pipeline_status = {
         "loaded_pipelines": list(_pipelines.keys()),
         "pipeline_count": len(_pipelines),
-        "default_language": API_CONFIG["default_language"],
+        "default_language": config.api.default_language,
         "device": _device
     }
     

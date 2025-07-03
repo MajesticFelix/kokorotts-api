@@ -89,16 +89,66 @@ EXPOSE 8000
 HEALTHCHECK --interval=20s --timeout=5s --start-period=45s --retries=3 \
     CMD python docker/healthcheck.py
 
-# CPU-optimized environment variables
-ENV HOST=0.0.0.0 \
+# CPU-optimized environment variables for KokoroTTS API
+ENV \
+    # Application settings (CPU optimized)
+    ENVIRONMENT=production \
+    HOST=0.0.0.0 \
     PORT=8000 \
     WORKERS=2 \
     LOG_LEVEL=info \
+    DEBUG=false \
+    RELOAD=false \
+    # API configuration
+    API_TITLE="Kokoro TTS API (CPU)" \
+    API_VERSION="1.0.0" \
+    API_DESCRIPTION="CPU-optimized OpenAI-compatible TTS API using Kokoro model" \
+    API_DOCS_URL="/docs" \
+    API_REDOC_URL="/redoc" \
+    API_STATIC_DIRECTORY="static" \
+    API_SUPPORTED_FORMATS="wav,mp3,flac,ogg,opus" \
+    API_MIN_SPEED=0.25 \
+    API_MAX_SPEED=4.0 \
+    API_DEFAULT_LANGUAGE="a" \
+    API_DEFAULT_VOICE="af_heart" \
+    API_DEFAULT_FORMAT="mp3" \
+    API_VOICE_CACHE_DURATION=3600 \
+    API_CORS_ORIGINS="*" \
+    API_CORS_METHODS="*" \
+    API_CORS_HEADERS="*" \
+    API_ALLOW_CREDENTIALS=true \
+    # TTS Engine configuration (CPU optimized)
+    KOKORO_DEVICE="cpu" \
+    KOKORO_SAMPLE_RATE=24000 \
+    KOKORO_DEFAULT_CHUNK_SIZE=600 \
+    KOKORO_MAX_CHUNK_SIZE=800 \
+    KOKORO_STREAMING_CHUNK_SIZE=600 \
+    KOKORO_MP3_BITRATE="128k" \
+    KOKORO_OPUS_CODEC="libopus" \
+    KOKORO_MEMORY_LIMIT_MB=768 \
+    KOKORO_BATCH_SIZE=3 \
     KOKORO_CACHE_DIR=/app/cache \
     KOKORO_MODEL_DIR=/app/models \
-    KOKORO_DEVICE=cpu \
+    KOKORO_REPO_ID="hexgrad/Kokoro-82M" \
+    # Security configuration
+    SECURITY_API_KEY_ENABLED=false \
+    SECURITY_RATE_LIMIT_ENABLED=false \
+    SECURITY_RATE_LIMIT_PER_MINUTE=60 \
+    SECURITY_RATE_LIMIT_BURST=10 \
+    # Monitoring configuration
+    MONITORING_HEALTH_CHECK_ENABLED=true \
+    MONITORING_HEALTH_CHECK_PATH="/health" \
+    MONITORING_METRICS_ENABLED=true \
+    MONITORING_METRICS_PATH="/metrics" \
+    MONITORING_LOG_FORMAT="json" \
+    MONITORING_SENTRY_ENVIRONMENT="production" \
+    # CPU optimization settings
     OMP_NUM_THREADS=2 \
     MKL_NUM_THREADS=2 \
+    TORCH_NUM_THREADS=2 \
+    PYTHONMALLOC=malloc \
+    MALLOC_ARENA_MAX=2 \
+    # System paths and cache
     HOME=/home/kokorotts \
     HF_HOME=/app/cache/huggingface \
     TRANSFORMERS_CACHE=/app/cache/transformers

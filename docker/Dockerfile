@@ -99,13 +99,60 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD python docker/healthcheck.py
 
-# Default environment variables
-ENV HOST=0.0.0.0 \
+# Default environment variables for KokoroTTS API
+ENV \
+    # Application settings
+    ENVIRONMENT=production \
+    HOST=0.0.0.0 \
     PORT=8000 \
     WORKERS=1 \
     LOG_LEVEL=info \
+    DEBUG=false \
+    RELOAD=false \
+    # API configuration
+    API_TITLE="Kokoro TTS API" \
+    API_VERSION="1.0.0" \
+    API_DESCRIPTION="OpenAI-compatible TTS API using Kokoro model with voice blending support" \
+    API_DOCS_URL="/docs" \
+    API_REDOC_URL="/redoc" \
+    API_STATIC_DIRECTORY="static" \
+    API_SUPPORTED_FORMATS="wav,mp3,flac,ogg,opus" \
+    API_MIN_SPEED=0.25 \
+    API_MAX_SPEED=4.0 \
+    API_DEFAULT_LANGUAGE="a" \
+    API_DEFAULT_VOICE="af_heart" \
+    API_DEFAULT_FORMAT="mp3" \
+    API_VOICE_CACHE_DURATION=3600 \
+    API_CORS_ORIGINS="*" \
+    API_CORS_METHODS="*" \
+    API_CORS_HEADERS="*" \
+    API_ALLOW_CREDENTIALS=true \
+    # TTS Engine configuration
+    KOKORO_DEVICE="auto" \
+    KOKORO_SAMPLE_RATE=24000 \
+    KOKORO_DEFAULT_CHUNK_SIZE=800 \
+    KOKORO_MAX_CHUNK_SIZE=1000 \
+    KOKORO_STREAMING_CHUNK_SIZE=800 \
+    KOKORO_MP3_BITRATE="192k" \
+    KOKORO_OPUS_CODEC="libopus" \
+    KOKORO_MEMORY_LIMIT_MB=1024 \
+    KOKORO_BATCH_SIZE=5 \
     KOKORO_CACHE_DIR=/app/cache \
     KOKORO_MODEL_DIR=/app/models \
+    KOKORO_REPO_ID="hexgrad/Kokoro-82M" \
+    # Security configuration
+    SECURITY_API_KEY_ENABLED=false \
+    SECURITY_RATE_LIMIT_ENABLED=false \
+    SECURITY_RATE_LIMIT_PER_MINUTE=60 \
+    SECURITY_RATE_LIMIT_BURST=10 \
+    # Monitoring configuration
+    MONITORING_HEALTH_CHECK_ENABLED=true \
+    MONITORING_HEALTH_CHECK_PATH="/health" \
+    MONITORING_METRICS_ENABLED=true \
+    MONITORING_METRICS_PATH="/metrics" \
+    MONITORING_LOG_FORMAT="json" \
+    MONITORING_SENTRY_ENVIRONMENT="production" \
+    # System paths and cache
     HOME=/home/kokorotts \
     HF_HOME=/app/cache/huggingface \
     TRANSFORMERS_CACHE=/app/cache/transformers

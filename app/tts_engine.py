@@ -8,6 +8,7 @@ import io
 import logging
 import gc
 import re
+import os
 from typing import Dict, Iterator, List, NamedTuple, Union, Optional
 
 import numpy as np
@@ -16,29 +17,39 @@ import torch
 from kokoro import KPipeline
 from pydub import AudioSegment
 
+from .config import get_settings
+
 # Configure logging
 logger = logging.getLogger(__name__)
 
+# Get configuration
+config = get_settings()
+
 # Global pipeline cache for different languages
 _pipelines: Dict[str, KPipeline] = {}
-_device = "cuda" if torch.cuda.is_available() else "cpu"
 
-# Configuration Constants
-DEFAULT_SAMPLE_RATE = 24000
-DEFAULT_CHUNK_SIZE = 800
-MAX_CHUNK_SIZE = 1000
-STREAMING_CHUNK_SIZE = 800
-AUDIO_SAMPLE_RATE = 24000
+# Device detection with configuration override
+def _get_device():
+    """Get the device to use for TTS processing."""
+    device_config = config.tts.device.lower()
+    if device_config == "auto":
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    elif device_config == "cuda" and not torch.cuda.is_available():
+        logger.warning("CUDA requested but not available, falling back to CPU")
+        return "cpu"
+    return device_config
 
-# Audio format configurations
-AUDIO_FORMAT_CONFIG = {
-    "soundfile_formats": ["wav", "flac", "ogg"],
-    "pydub_formats": ["mp3", "opus"],
-    "format_configs": {
-        "mp3": {"format": "mp3", "bitrate": "192k"},
-        "opus": {"format": "opus", "codec": "libopus"}
-    }
-}
+_device = _get_device()
+
+# Configuration Constants (now using config)
+DEFAULT_SAMPLE_RATE = config.tts.sample_rate
+DEFAULT_CHUNK_SIZE = config.tts.default_chunk_size
+MAX_CHUNK_SIZE = config.tts.max_chunk_size
+STREAMING_CHUNK_SIZE = config.tts.streaming_chunk_size
+AUDIO_SAMPLE_RATE = config.tts.sample_rate
+
+# Audio format configurations (now using config)
+AUDIO_FORMAT_CONFIG = config.get_audio_format_config()
 
 # Data structures for timing information
 class WordTiming(NamedTuple):
@@ -406,16 +417,20 @@ def calculate_audio_duration(audio_data: np.ndarray, sample_rate: int = DEFAULT_
     """
     return len(audio_data) / sample_rate
 
-def should_use_batch_processing(text: str, memory_limit_mb: float = 1024) -> bool:
+def should_use_batch_processing(text: str, memory_limit_mb: Optional[float] = None) -> bool:
     """Determine if text should be processed in batches.
     
     Args:
         text: Input text to analyze
-        memory_limit_mb: Memory limit in MB
+        memory_limit_mb: Memory limit in MB (defaults to config setting)
         
     Returns:
         True if batch processing is recommended
     """
+    # Use config default if not provided
+    if memory_limit_mb is None:
+        memory_limit_mb = config.tts.memory_limit_mb
+    
     # Simple heuristic: if text is very long, use batch processing
     text_length = len(text)
     # Rough estimate: ~2.5MB per 1000 characters with captions
@@ -451,7 +466,7 @@ def _batch_synthesize(
     logger.info(f"Using batch processing for {len(text_chunks)} chunks ({voice_type} voice)")
     
     # Process in smaller batches to manage memory
-    batch_size = 5  # Process 5 chunks at a time
+    batch_size = config.tts.batch_size  # Use configurable batch size
     all_audio_segments = []
     all_word_timings = [] if include_captions else None
     chunk_time_offset = 0.0 if include_captions else 0.0
@@ -631,9 +646,9 @@ def _combine_audio_segments(audio_segments: List[bytes], format: str) -> bytes:
     # Export to bytes
     output_buffer = io.BytesIO()
     if format.lower() == 'mp3':
-        combined_audio.export(output_buffer, format='mp3', bitrate='192k')
+        combined_audio.export(output_buffer, format='mp3', bitrate=config.tts.mp3_bitrate)
     elif format.lower() == 'opus':
-        combined_audio.export(output_buffer, format='opus', codec='libopus')
+        combined_audio.export(output_buffer, format='opus', codec=config.tts.opus_codec)
     else:
         combined_audio.export(output_buffer, format=format)
     
@@ -692,7 +707,7 @@ def _core_synthesize(
     format: str = "wav",
     lang_code: str = "a",
     include_captions: bool = False,
-    chunk_size: int = DEFAULT_CHUNK_SIZE
+    chunk_size: Optional[int] = None
 ) -> Union[bytes, SynthesisResult]:
     """Core synthesis engine that handles both single and blended voices.
     
@@ -723,6 +738,8 @@ def _core_synthesize(
         prepared_voice = _prepare_voice_for_synthesis(voice_spec, lang_pipeline)
         
         # Use intelligent text segmentation for better results
+        if chunk_size is None:
+            chunk_size = config.tts.default_chunk_size
         text_chunks = text_segmentation(text, chunk_size)
         voice_type = "blended" if isinstance(voice_spec, dict) else "single"
         
@@ -881,7 +898,7 @@ def _core_streaming_synthesize(
         prepared_voice = _prepare_voice_for_synthesis(voice_spec, lang_pipeline)
         
         # Use intelligent text segmentation optimized for streaming
-        streaming_chunk_size = 600  # Smaller chunks for streaming
+        streaming_chunk_size = config.tts.streaming_chunk_size  # Configurable chunks for streaming
         text_chunks = text_segmentation(text, streaming_chunk_size)
         voice_type = "blended" if isinstance(voice_spec, dict) else "single"
         
