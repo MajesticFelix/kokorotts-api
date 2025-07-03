@@ -43,14 +43,13 @@ FROM base as dependencies
 # Copy requirements
 COPY requirements.txt .
 
-# Create CPU-optimized requirements by filtering out GPU-specific packages
-RUN grep -v "nvidia-" requirements.txt > requirements_cpu.txt
-
-# Install Python dependencies optimized for CPU
+# Create CPU-optimized requirements by filtering out GPU-specific and platform-incompatible packages
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    # Filter out GPU-specific and platform-incompatible packages
+    grep -v "nvidia-" requirements.txt | grep -v "triton" > requirements_cpu.txt && \
     # Install CPU-only PyTorch (smaller, faster download)
     pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu && \
-    # Install other dependencies (excluding GPU packages)
+    # Install other dependencies (excluding GPU packages and triton)
     pip install --no-cache-dir -r requirements_cpu.txt
 
 # ================================

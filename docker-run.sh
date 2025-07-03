@@ -46,11 +46,20 @@ COMPOSE_PROD="docker/docker-compose.prod.yml"
 case "$1" in
     "up")
         echo -e "${GREEN}Starting KokoroTTS API (CPU version)...${NC}"
+        # Check if we're on macOS and suggest CPU version
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            echo -e "${YELLOW}Note: Running on macOS - using CPU-optimized build${NC}"
+        fi
         docker-compose -f $COMPOSE_FILE up -d
         echo -e "${GREEN}Services started! API available at http://localhost:8000${NC}"
         ;;
     "up-gpu")
         echo -e "${GREEN}Starting KokoroTTS API (GPU version)...${NC}"
+        # Check if running on macOS
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            echo -e "${YELLOW}Warning: GPU acceleration not supported on macOS${NC}"
+            echo -e "${YELLOW}Consider using './docker-run.sh up' for CPU version instead${NC}"
+        fi
         # First, check if GPU service is uncommented
         if grep -q "# kokorotts-api-gpu:" $COMPOSE_FILE; then
             echo -e "${YELLOW}GPU service is commented out in docker-compose.yml${NC}"
@@ -81,10 +90,17 @@ case "$1" in
         ;;
     "build-cpu")
         echo -e "${GREEN}Building CPU image...${NC}"
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            echo -e "${YELLOW}Building macOS-compatible CPU image (triton excluded)${NC}"
+        fi
         docker build -f docker/Dockerfile.cpu -t kokorotts-api:cpu .
         ;;
     "build-gpu")
         echo -e "${GREEN}Building GPU image...${NC}"
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            echo -e "${YELLOW}Warning: GPU builds on macOS may fail due to CUDA dependencies${NC}"
+            echo -e "${YELLOW}Consider using CPU build instead: ./docker-run.sh build-cpu${NC}"
+        fi
         docker build -f docker/Dockerfile.gpu -t kokorotts-api:gpu .
         ;;
     "logs")

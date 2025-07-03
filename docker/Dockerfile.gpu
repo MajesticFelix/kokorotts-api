@@ -73,8 +73,11 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     # Install PyTorch with CUDA support (GPU-optimized)
     pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cu121 && \
-    # Install other dependencies including NVIDIA packages
-    pip install --no-cache-dir -r requirements.txt
+    # Install triton specifically for GPU builds (required for CUDA)
+    pip install --no-cache-dir triton && \
+    # Install other dependencies (excluding triton since we installed it separately)
+    grep -v "triton" requirements.txt > requirements_gpu.txt && \
+    pip install --no-cache-dir -r requirements_gpu.txt
 
 # ================================
 # Stage 3: Application

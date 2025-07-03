@@ -138,9 +138,14 @@ venv\Scripts\activate     # Windows
 # Install dependencies
 pip install -r requirements.txt
 
+# For macOS users: Skip triton if installation fails
+pip install -r requirements.txt || pip install $(grep -v "triton" requirements.txt | tr '\n' ' ')
+
 # Start the API
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
+
+> **Note for macOS users**: If you encounter triton installation errors during local development, the fallback command above will skip triton automatically. For Docker deployments, triton is filtered automatically.
 
 ## 🎯 API Documentation
 
@@ -557,6 +562,23 @@ See [LICENSE](LICENSE) for full license text.
 ## 🔧 Troubleshooting
 
 ### Docker Issues
+
+**macOS Docker Build Issues (Triton dependency):**
+```bash
+# Docker automatically filters out triton for macOS compatibility
+# No special configuration needed - just use the standard commands:
+
+./docker-run.sh up
+# OR
+docker-compose -f docker/docker-compose.yml up -d
+
+# Verify triton is automatically excluded:
+docker run --rm kokorotts-api pip list | grep triton
+# Should return nothing
+
+# For local Python development on macOS, if triton fails:
+pip install -r requirements.txt || pip install $(grep -v "triton" requirements.txt | tr '\n' ' ')
+```
 
 **Container not starting:**
 ```bash

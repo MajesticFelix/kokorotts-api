@@ -53,12 +53,14 @@ FROM base as dependencies
 # Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install Python dependencies
+# Create platform-compatible requirements
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    # Filter out platform-incompatible packages
+    grep -v "triton" requirements.txt > requirements_filtered.txt && \
     # Install PyTorch with specified index URL (CPU or GPU)
     pip install --no-cache-dir torch torchaudio --index-url ${TORCH_INDEX_URL} && \
-    # Install other dependencies
-    pip install --no-cache-dir -r requirements.txt
+    # Install other dependencies (filtered)
+    pip install --no-cache-dir -r requirements_filtered.txt
 
 # ================================
 # Stage 3: Application
