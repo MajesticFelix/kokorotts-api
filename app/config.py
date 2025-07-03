@@ -4,9 +4,9 @@ This module provides centralized configuration management using Pydantic Setting
 to load and validate configuration from environment variables with sensible defaults.
 """
 
-from typing import List, Optional
+from typing import List, Optional, Union
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class TTSEngineConfig(BaseSettings):
@@ -34,9 +34,10 @@ class TTSEngineConfig(BaseSettings):
     model_dir: str = Field(default="/app/models", description="Model storage directory")
     repo_id: str = Field(default="hexgrad/Kokoro-82M", description="HuggingFace model repository ID")
     
-    class Config:
-        env_prefix = "KOKORO_"
-        case_sensitive = False
+    model_config = SettingsConfigDict(
+        env_prefix="KOKORO_",
+        case_sensitive=False
+    )
 
 
 class APIConfig(BaseSettings):
@@ -59,7 +60,7 @@ class APIConfig(BaseSettings):
     )
     
     # API behavior settings
-    supported_formats: List[str] = Field(
+    supported_formats: Union[List[str], str] = Field(
         default=["wav", "mp3", "flac", "ogg", "opus"],
         description="Supported audio formats"
     )
@@ -71,9 +72,18 @@ class APIConfig(BaseSettings):
     voice_cache_duration: int = Field(default=3600, description="Voice cache duration in seconds")
     
     # CORS settings
-    cors_origins: List[str] = Field(default=["*"], description="CORS allowed origins")
-    cors_methods: List[str] = Field(default=["*"], description="CORS allowed methods")
-    cors_headers: List[str] = Field(default=["*"], description="CORS allowed headers")
+    cors_origins: Union[List[str], str] = Field(
+        default=["*"], 
+        description="CORS allowed origins"
+    )
+    cors_methods: Union[List[str], str] = Field(
+        default=["*"], 
+        description="CORS allowed methods"
+    )
+    cors_headers: Union[List[str], str] = Field(
+        default=["*"], 
+        description="CORS allowed headers"
+    )
     allow_credentials: bool = Field(default=True, description="Allow CORS credentials")
     
     # Static files
@@ -85,7 +95,9 @@ class APIConfig(BaseSettings):
     @classmethod
     def parse_supported_formats(cls, v):
         if isinstance(v, str):
-            formats = [format.strip() for format in v.split(',')]
+            if not v.strip():  # Handle empty strings
+                return ["wav", "mp3", "flac", "ogg", "opus"]
+            formats = [format.strip() for format in v.split(',') if format.strip()]
             # Validate formats
             valid_formats = ['wav', 'mp3', 'flac', 'ogg', 'opus']
             invalid_formats = [f for f in formats if f not in valid_formats]
@@ -94,11 +106,13 @@ class APIConfig(BaseSettings):
             return formats
         return v
     
-    @field_validator('cors_origins', mode='before')
+    @field_validator('cors_origins', 'cors_methods', 'cors_headers', mode='before')
     @classmethod
-    def parse_cors_origins(cls, v):
+    def parse_cors_lists(cls, v):
         if isinstance(v, str):
-            return [origin.strip() for origin in v.split(',')]
+            if not v.strip():  # Handle empty strings
+                return ["*"]
+            return [item.strip() for item in v.split(',') if item.strip()]
         return v
     
     @field_validator('log_level')
@@ -118,9 +132,11 @@ class APIConfig(BaseSettings):
             raise ValueError('Speed values must be between 0.1 and 10.0')
         return v
     
-    class Config:
-        env_prefix = "API_"
-        case_sensitive = False
+    model_config = SettingsConfigDict(
+        env_prefix="API_",
+        case_sensitive=False,
+        env_parse_none_str=""
+    )
 
 
 class SecurityConfig(BaseSettings):
@@ -136,9 +152,10 @@ class SecurityConfig(BaseSettings):
     rate_limit_per_minute: int = Field(default=60, description="Requests per minute limit")
     rate_limit_burst: int = Field(default=10, description="Burst limit for rate limiting")
     
-    class Config:
-        env_prefix = "SECURITY_"
-        case_sensitive = False
+    model_config = SettingsConfigDict(
+        env_prefix="SECURITY_",
+        case_sensitive=False
+    )
 
 
 class MonitoringConfig(BaseSettings):
@@ -161,9 +178,10 @@ class MonitoringConfig(BaseSettings):
     sentry_dsn: Optional[str] = Field(default=None, description="Sentry DSN for error tracking")
     sentry_environment: str = Field(default="production", description="Sentry environment")
     
-    class Config:
-        env_prefix = "MONITORING_"
-        case_sensitive = False
+    model_config = SettingsConfigDict(
+        env_prefix="MONITORING_",
+        case_sensitive=False
+    )
 
 
 class Settings(BaseSettings):
@@ -237,10 +255,11 @@ class Settings(BaseSettings):
             }
         }
     
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = False
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False
+    )
 
 
 # Global settings instance
