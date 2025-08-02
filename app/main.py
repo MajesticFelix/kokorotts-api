@@ -763,7 +763,7 @@ async def validate_config():
                 "timestamp": datetime.now().isoformat()
             }
         )
-111
+
 @app.get("/debug", response_model=DebugInfoResponse, tags=["Debug"])
 async def debug_info():
     """Comprehensive debug information endpoint"""
